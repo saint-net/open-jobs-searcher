@@ -1,16 +1,24 @@
-"""Главный модуль приложения Open Jobs Searcher."""
+"""Main module for Open Jobs Searcher application."""
 
 import asyncio
+import logging
 from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.logging import RichHandler
 
 from src.config import settings
 from src.searchers import HeadHunterSearcher, WebsiteSearcher
 from src.llm import get_llm_provider
 from src.output import display_jobs, save_jobs
 
+# Configure logging
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(message)s",
+    handlers=[RichHandler(rich_tracebacks=True, show_path=False)],
+)
 
 app = typer.Typer(
     name="jobs-searcher",
@@ -161,15 +169,25 @@ def website(
         "-f",
         help="Формат вывода (json/csv)",
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Показать отладочную информацию",
+    ),
 ):
     """Поиск вакансий на сайте компании с помощью LLM."""
+    # Enable debug logging if verbose
+    if verbose:
+        logging.getLogger("src").setLevel(logging.DEBUG)
+    
     console.print(f"[bold blue]🌐 Сайт:[/bold blue] {url}")
     console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({model})")
     if browser:
         console.print(f"[bold blue]🌐 Режим:[/bold blue] браузер (Playwright)")
     console.print()
 
-    # Запускаем асинхронный поиск
+    # Run async search
     jobs = asyncio.run(_search_website(url, provider, model, browser))
 
     # Отображаем результаты

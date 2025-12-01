@@ -1,16 +1,20 @@
-"""Универсальный поисковик вакансий на сайтах компаний."""
+"""Universal job searcher for company websites."""
 
-from typing import Optional
-from urllib.parse import urljoin, urlparse
+import logging
 import re
 import xml.etree.ElementTree as ET
+from typing import Optional
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.models import Job
 from src.searchers.base import BaseSearcher
 from src.llm.base import BaseLLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 class WebsiteSearcher(BaseSearcher):
@@ -161,29 +165,42 @@ class WebsiteSearcher(BaseSearcher):
         return None
 
     async def _fetch(self, url: str) -> Optional[str]:
-        """Загрузить HTML страницы."""
+        """Fetch HTML content from URL."""
         if self.use_browser:
             return await self._fetch_with_browser(url)
         return await self._fetch_with_httpx(url)
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((httpx.RequestError, httpx.TimeoutException)),
+        reraise=True,
+    )
+    async def _fetch_with_httpx_retry(self, url: str) -> httpx.Response:
+        """Fetch with retry logic."""
+        response = await self.client.get(url)
+        response.raise_for_status()
+        return response
+
     async def _fetch_with_httpx(self, url: str) -> Optional[str]:
-        """Загрузить HTML через httpx (быстро, но без JS)."""
+        """Fetch HTML via httpx (fast, no JS)."""
         try:
-            response = await self.client.get(url)
-            response.raise_for_status()
+            response = await self._fetch_with_httpx_retry(url)
             return response.text
-        except httpx.HTTPStatusError:
+        except httpx.HTTPStatusError as e:
+            logger.debug(f"HTTP error {e.response.status_code} for {url}")
             return None
-        except httpx.RequestError:
+        except httpx.RequestError as e:
+            logger.warning(f"Request failed after retries for {url}: {e}")
             return None
 
     async def _fetch_with_browser(self, url: str) -> Optional[str]:
-        """Загрузить HTML через Playwright (медленно, но с JS)."""
+        """Fetch HTML via Playwright (slow, with JS)."""
         try:
             loader = await self._get_browser_loader()
             return await loader.fetch(url)
         except Exception as e:
-            print(f"Browser fetch error: {e}")
+            logger.warning(f"Browser fetch error for {url}: {e}")
             return None
 
     async def _try_alternative_urls(self, base_url: str) -> Optional[str]:
@@ -196,22 +213,25 @@ class WebsiteSearcher(BaseSearcher):
         return None
 
     async def _find_careers_url_from_sitemap(self, base_url: str) -> Optional[str]:
-        """Найти страницу вакансий через sitemap.xml."""
+        """Find careers page URL from sitemap.xml."""
         base = base_url.rstrip('/')
         
-        # Возможные расположения sitemap
+        # Possible sitemap locations
         sitemap_urls = [
             f"{base}/sitemap.xml",
             f"{base}/sitemap_index.xml",
             f"{base}/sitemap-index.xml",
         ]
         
-        all_urls = []  # Собираем все URL для LLM fallback
+        all_urls = []  # Collect URLs for LLM fallback
         
         for sitemap_url in sitemap_urls:
             try:
-                response = await self.client.get(sitemap_url)
-                if response.status_code != 200:
+                # Use retry logic for sitemap fetch
+                try:
+                    response = await self._fetch_with_httpx_retry(sitemap_url)
+                except (httpx.HTTPStatusError, httpx.RequestError):
+                    logger.debug(f"Sitemap not found or error: {sitemap_url}")
                     continue
                     
                 xml_content = response.text
@@ -252,23 +272,26 @@ class WebsiteSearcher(BaseSearcher):
                 # Сохраняем для LLM fallback
                 all_urls.extend(urls)
                 
-                # Ищем URL с карьерными паттернами (быстрый regex)
+                # Search for career patterns (fast regex)
                 for page_url in urls:
                     for pattern in self.CAREER_PATTERNS:
                         if re.search(pattern, page_url, re.IGNORECASE):
+                            logger.debug(f"Found careers URL in sitemap: {page_url}")
                             return page_url
                             
-            except (httpx.RequestError, ET.ParseError):
+            except ET.ParseError as e:
+                logger.debug(f"XML parse error for {sitemap_url}: {e}")
                 continue
         
-        # Fallback: используем LLM для анализа URL из sitemap
+        # Fallback: use LLM to analyze sitemap URLs
         if all_urls:
+            logger.debug(f"Using LLM to analyze {len(all_urls)} URLs from sitemap")
             return await self.llm.find_careers_url_from_sitemap(all_urls, base_url)
         
         return None
 
     def _find_careers_url_heuristic(self, html: str, base_url: str) -> Optional[str]:
-        """Эвристический поиск ссылки на страницу вакансий."""
+        """Heuristic search for careers page link in HTML."""
         soup = BeautifulSoup(html, 'lxml')
         
         for link in soup.find_all('a', href=True):
