@@ -13,6 +13,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from src.models import Job
 from src.searchers.base import BaseSearcher
 from src.llm.base import BaseLLMProvider
+from src.browser import DomainUnreachableError
 
 logger = logging.getLogger(__name__)
 
@@ -117,50 +118,55 @@ class WebsiteSearcher(BaseSearcher):
 
         careers_url = None
 
-        # 1. Пробуем найти через sitemap.xml (быстро и надёжно)
-        careers_url = await self._find_careers_url_from_sitemap(url)
+        try:
+            # 1. Пробуем найти через sitemap.xml (быстро и надёжно)
+            careers_url = await self._find_careers_url_from_sitemap(url)
 
-        # 2. Загружаем главную страницу и ищем эвристически
-        if not careers_url:
-            html = await self._fetch(url)
-            if html:
-                careers_url = self._find_careers_url_heuristic(html, url)
-                
-                # 3. Если не нашли - используем LLM
-                if not careers_url:
-                    careers_url = await self.llm.find_careers_url(html, url)
-
-        # 4. Пробуем альтернативные URL напрямую
-        if not careers_url or careers_url == "NOT_FOUND":
-            careers_url = await self._try_alternative_urls(url)
+            # 2. Загружаем главную страницу и ищем эвристически
             if not careers_url:
+                html = await self._fetch(url)
+                if html:
+                    careers_url = self._find_careers_url_heuristic(html, url)
+                    
+                    # 3. Если не нашли - используем LLM
+                    if not careers_url:
+                        careers_url = await self.llm.find_careers_url(html, url)
+
+            # 4. Пробуем альтернативные URL напрямую
+            if not careers_url or careers_url == "NOT_FOUND":
+                careers_url = await self._try_alternative_urls(url)
+                if not careers_url:
+                    return []
+
+            # 5. Загружаем страницу вакансий
+            careers_html = await self._fetch(careers_url)
+            if not careers_html:
                 return []
 
-        # 4. Загружаем страницу вакансий
-        careers_html = await self._fetch(careers_url)
-        if not careers_html:
+            # 6. Извлекаем вакансии с помощью LLM
+            jobs_data = await self.llm.extract_jobs(careers_html, careers_url)
+
+            # 7. Преобразуем в модели Job
+            jobs = []
+            company_name = self._extract_company_name(url)
+            
+            for idx, job_data in enumerate(jobs_data):
+                job = Job(
+                    id=f"web-{urlparse(url).netloc}-{idx}",
+                    title=job_data.get("title", "Unknown Position"),
+                    company=company_name,
+                    location=job_data.get("location", "Unknown"),
+                    url=job_data.get("url", careers_url),
+                    source=f"website:{urlparse(url).netloc}",
+                    description=job_data.get("description"),
+                )
+                jobs.append(job)
+
+            return jobs
+            
+        except DomainUnreachableError as e:
+            logger.error(f"Домен недоступен: {url} - {e}")
             return []
-
-        # 5. Извлекаем вакансии с помощью LLM
-        jobs_data = await self.llm.extract_jobs(careers_html, careers_url)
-
-        # 6. Преобразуем в модели Job
-        jobs = []
-        company_name = self._extract_company_name(url)
-        
-        for idx, job_data in enumerate(jobs_data):
-            job = Job(
-                id=f"web-{urlparse(url).netloc}-{idx}",
-                title=job_data.get("title", "Unknown Position"),
-                company=company_name,
-                location=job_data.get("location", "Unknown"),
-                url=job_data.get("url", careers_url),
-                source=f"website:{urlparse(url).netloc}",
-                description=job_data.get("description"),
-            )
-            jobs.append(job)
-
-        return jobs
 
     async def get_job_details(self, job_id: str) -> Optional[Job]:
         """Получить детали вакансии (не реализовано для website)."""
@@ -192,6 +198,20 @@ class WebsiteSearcher(BaseSearcher):
         except httpx.HTTPStatusError as e:
             logger.debug(f"HTTP error {e.response.status_code} for {url}")
             return None
+        except httpx.ConnectError as e:
+            error_str = str(e).lower()
+            # Detect DNS resolution errors
+            if any(err in error_str for err in [
+                "name or service not known",
+                "nodename nor servname provided",
+                "getaddrinfo failed",
+                "no address associated",
+                "name resolution failed",
+                "temporary failure in name resolution",
+            ]):
+                raise DomainUnreachableError(f"Домен недоступен: {url}") from e
+            logger.warning(f"Connection error for {url}: {e}")
+            return None
         except httpx.RequestError as e:
             logger.warning(f"Request failed after retries for {url}: {e}")
             return None
@@ -201,6 +221,8 @@ class WebsiteSearcher(BaseSearcher):
         try:
             loader = await self._get_browser_loader()
             return await loader.fetch(url)
+        except DomainUnreachableError:
+            raise  # Re-raise to handle at caller level
         except Exception as e:
             logger.warning(f"Browser fetch error for {url}: {e}")
             return None
@@ -209,9 +231,14 @@ class WebsiteSearcher(BaseSearcher):
         """Попробовать альтернативные URL для страницы вакансий."""
         alternatives = self._generate_alternative_urls(base_url)
         for alt_url in alternatives:
-            html = await self._fetch(alt_url)
-            if html:
-                return alt_url
+            try:
+                html = await self._fetch(alt_url)
+                if html:
+                    return alt_url
+            except DomainUnreachableError:
+                # Domain is unreachable, no point trying other URLs
+                logger.info("Домен недоступен, прекращаем перебор URL")
+                raise
         return None
 
     async def _find_careers_url_from_sitemap(self, base_url: str) -> Optional[str]:

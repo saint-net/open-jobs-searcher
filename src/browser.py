@@ -6,6 +6,11 @@ from contextlib import asynccontextmanager
 from playwright.async_api import async_playwright, Browser, Page, Playwright
 
 
+class DomainUnreachableError(Exception):
+    """Raised when domain cannot be reached (DNS or network issues)."""
+    pass
+
+
 class BrowserLoader:
     """Загрузчик страниц через headless браузер."""
 
@@ -83,6 +88,19 @@ class BrowserLoader:
             return html
 
         except Exception as e:
+            error_str = str(e)
+            # Detect domain/network unreachable errors - fail fast
+            if any(err in error_str for err in [
+                "ERR_NAME_NOT_RESOLVED",
+                "ERR_CONNECTION_REFUSED",
+                "ERR_CONNECTION_RESET",
+                "ERR_CONNECTION_TIMED_OUT",
+                "ERR_NETWORK_CHANGED",
+                "ERR_INTERNET_DISCONNECTED",
+                "ERR_ADDRESS_UNREACHABLE",
+            ]):
+                raise DomainUnreachableError(f"Домен недоступен: {url}") from e
+            
             print(f"Browser error for {url}: {e}")
             return None
         finally:
