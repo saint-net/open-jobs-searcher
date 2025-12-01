@@ -3,6 +3,7 @@
 from typing import Optional
 from urllib.parse import urljoin, urlparse
 import re
+import xml.etree.ElementTree as ET
 
 import httpx
 from bs4 import BeautifulSoup
@@ -108,20 +109,23 @@ class WebsiteSearcher(BaseSearcher):
         if not url.startswith(('http://', 'https://')):
             url = f'https://{url}'
 
-        # 1. Загружаем главную страницу
-        html = await self._fetch(url)
-        if not html:
-            return []
+        careers_url = None
 
-        # 2. Пробуем найти страницу вакансий эвристически
-        careers_url = self._find_careers_url_heuristic(html, url)
+        # 1. Пробуем найти через sitemap.xml (быстро и надёжно)
+        careers_url = await self._find_careers_url_from_sitemap(url)
 
-        # 3. Если не нашли - используем LLM
+        # 2. Загружаем главную страницу и ищем эвристически
         if not careers_url:
-            careers_url = await self.llm.find_careers_url(html, url)
+            html = await self._fetch(url)
+            if html:
+                careers_url = self._find_careers_url_heuristic(html, url)
+                
+                # 3. Если не нашли - используем LLM
+                if not careers_url:
+                    careers_url = await self.llm.find_careers_url(html, url)
 
+        # 4. Пробуем альтернативные URL напрямую
         if not careers_url or careers_url == "NOT_FOUND":
-            # Пробуем альтернативные URL напрямую
             careers_url = await self._try_alternative_urls(url)
             if not careers_url:
                 return []
@@ -191,6 +195,68 @@ class WebsiteSearcher(BaseSearcher):
                 return alt_url
         return None
 
+    async def _find_careers_url_from_sitemap(self, base_url: str) -> Optional[str]:
+        """Найти страницу вакансий через sitemap.xml."""
+        base = base_url.rstrip('/')
+        
+        # Возможные расположения sitemap
+        sitemap_urls = [
+            f"{base}/sitemap.xml",
+            f"{base}/sitemap_index.xml",
+            f"{base}/sitemap-index.xml",
+        ]
+        
+        for sitemap_url in sitemap_urls:
+            try:
+                response = await self.client.get(sitemap_url)
+                if response.status_code != 200:
+                    continue
+                    
+                xml_content = response.text
+                
+                # Парсим XML
+                root = ET.fromstring(xml_content)
+                
+                # Namespace для sitemap
+                ns = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+                
+                # Ищем URL с карьерными паттернами
+                urls = []
+                
+                # Проверяем, это sitemap index или обычный sitemap
+                sitemaps = root.findall('.//sm:sitemap/sm:loc', ns)
+                if sitemaps:
+                    # Это sitemap index — ищем вложенный sitemap с вакансиями
+                    for sitemap in sitemaps:
+                        loc = sitemap.text
+                        if loc and any(re.search(p, loc, re.IGNORECASE) for p in self.CAREER_PATTERNS):
+                            # Загружаем вложенный sitemap
+                            nested_url = await self._find_careers_url_from_sitemap(loc)
+                            if nested_url:
+                                return nested_url
+                
+                # Ищем URL страниц
+                for url_elem in root.findall('.//sm:url/sm:loc', ns):
+                    if url_elem.text:
+                        urls.append(url_elem.text)
+                
+                # Также пробуем без namespace (некоторые сайты не используют его)
+                if not urls:
+                    for url_elem in root.findall('.//url/loc'):
+                        if url_elem.text:
+                            urls.append(url_elem.text)
+                
+                # Ищем URL с карьерными паттернами
+                for page_url in urls:
+                    for pattern in self.CAREER_PATTERNS:
+                        if re.search(pattern, page_url, re.IGNORECASE):
+                            return page_url
+                            
+            except (httpx.RequestError, ET.ParseError):
+                continue
+        
+        return None
+
     def _find_careers_url_heuristic(self, html: str, base_url: str) -> Optional[str]:
         """Эвристический поиск ссылки на страницу вакансий."""
         soup = BeautifulSoup(html, 'lxml')
@@ -245,6 +311,8 @@ class WebsiteSearcher(BaseSearcher):
             f"{base}/join",
             f"{base}/team",
             f"{base}/about/careers",
+            f"{base}/about-us/careers",
+            f"{base}/company/careers",
             f"{base}/en/careers",
             # German
             f"{base}/karriere",
@@ -252,9 +320,13 @@ class WebsiteSearcher(BaseSearcher):
             f"{base}/stellenangebote",
             f"{base}/offene-stellen",
             f"{base}/de/karriere",
+            f"{base}/ueber-uns/karriere",
+            f"{base}/unternehmen/karriere",
+            f"{base}/jobs-karriere",
             # Russian
             f"{base}/ru/careers",
-            f"{base}/vacancies",
+            f"{base}/o-kompanii/vakansii",
+            f"{base}/company/vacancies",
         ]
         return alternatives
 
