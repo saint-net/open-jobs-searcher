@@ -7,7 +7,8 @@ import typer
 from rich.console import Console
 
 from src.config import settings
-from src.searchers import HeadHunterSearcher
+from src.searchers import HeadHunterSearcher, WebsiteSearcher
+from src.llm import get_llm_provider
 from src.output import display_jobs, save_jobs
 
 
@@ -118,8 +119,81 @@ def info():
     console.print("Версия: 0.1.0")
     console.print("\nПоддерживаемые источники:")
     console.print("  • HeadHunter (hh.ru)")
+    console.print("  • Любой сайт компании (через LLM)")
     console.print("\nИспользование:")
     console.print("  jobs-searcher search 'Python Developer' --location Moscow")
+    console.print("  jobs-searcher website https://example.com")
+
+
+@app.command()
+def website(
+    url: str = typer.Argument(
+        ...,
+        help="URL сайта компании (например, https://company.com)",
+    ),
+    provider: str = typer.Option(
+        "ollama",
+        "--provider",
+        "-p",
+        help="LLM провайдер (ollama, openai, claude)",
+    ),
+    model: str = typer.Option(
+        "gpt-oss:20b",
+        "--model",
+        "-m",
+        help="Модель LLM",
+    ),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Сохранить результаты в файл",
+    ),
+    format: str = typer.Option(
+        "json",
+        "--format",
+        "-f",
+        help="Формат вывода (json/csv)",
+    ),
+):
+    """Поиск вакансий на сайте компании с помощью LLM."""
+    console.print(f"[bold blue]🌐 Сайт:[/bold blue] {url}")
+    console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({model})")
+    console.print()
+
+    # Запускаем асинхронный поиск
+    jobs = asyncio.run(_search_website(url, provider, model))
+
+    # Отображаем результаты
+    display_jobs(jobs)
+
+    # Сохраняем если указан путь
+    if output:
+        save_jobs(jobs, output, format)
+
+
+async def _search_website(url: str, provider: str, model: str) -> list:
+    """Асинхронный поиск вакансий на сайте."""
+    try:
+        llm = get_llm_provider(provider, model=model)
+    except Exception as e:
+        console.print(f"[red]✗[/red] Ошибка инициализации LLM: {e}")
+        return []
+
+    async with WebsiteSearcher(llm) as searcher:
+        try:
+            with console.status("[bold green]Анализирую сайт..."):
+                jobs = await searcher.search(keywords=url)
+            
+            if jobs:
+                console.print(f"[green]✓[/green] Найдено {len(jobs)} вакансий")
+            else:
+                console.print("[yellow]⚠[/yellow] Вакансии не найдены")
+            
+            return jobs
+        except Exception as e:
+            console.print(f"[red]✗[/red] Ошибка: {e}")
+            return []
 
 
 if __name__ == "__main__":
