@@ -1,0 +1,46 @@
+[project]
+name = "open-jobs-searcher"
+version = "0.1.0"
+description = "Поиск вакансий с различных платформ"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.1.0",
+    "pandas>=2.2.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.5.3",
+    "pydantic-settings>=2.1.0",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+    "aiohttp>=3.9.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "black>=24.1.0",
+    "ruff>=0.1.14",
+]
+
+[project.scripts]
+jobs-searcher = "main:app"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+

@@ -1,0 +1,26 @@
+# Web scraping and HTTP
+requests>=2.31.0
+httpx>=0.27.0
+beautifulsoup4>=4.12.3
+lxml>=5.1.0
+
+# Data processing
+pandas>=2.2.3
+
+# Configuration
+python-dotenv>=1.0.0
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+
+# CLI interface
+rich>=13.7.0
+typer>=0.9.0
+
+# Async support
+aiohttp>=3.9.1
+
+# Development
+pytest>=8.0.0
+black>=24.1.0
+ruff>=0.1.14
+
