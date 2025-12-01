@@ -23,47 +23,46 @@ Instructions:
 Return ONLY the URL, nothing else. If you can't find it, return "NOT_FOUND".
 """
 
-EXTRACT_JOBS_PROMPT = """You are extracting job listings from a careers page.
+EXTRACT_JOBS_PROMPT = """Extract job listings from this careers page HTML.
 
 URL: {url}
 
-Here is the HTML content:
-
+HTML:
 {html}
 
-Task: Extract all job openings from this page.
+TASK: Find ALL job postings and extract them as JSON.
 
-For each job, extract:
-- title: Job title/position name
-- location: Office location or "Remote" (if not found, use "Unknown")
-- url: Direct link to the job posting (full URL)
-- department: Department name (if available, otherwise null)
+Look for job titles in:
+- Headings (h1, h2, h3, h4)
+- List items with job names
+- Cards or grid items with position titles
+- Links to job detail pages
 
-Return a JSON array with the job listings. Example format:
+Common patterns:
+- <h3>Software Developer (m/w/d)</h3>
+- <a href="/jobs/123">Senior Engineer</a>
+- <div class="job-title">Product Manager</div>
+
+For EACH job found, extract:
+- title: The job title exactly as written
+- location: City/region or "Remote" or "Unknown"  
+- url: Full URL to job details (combine with {url} if relative)
+- department: Department if mentioned, otherwise null
+
+OUTPUT FORMAT - Return ONLY a JSON array:
 ```json
 [
-  {{
-    "title": "Senior Python Developer",
-    "location": "Berlin",
-    "url": "https://example.com/jobs/123",
-    "department": "Engineering"
-  }},
-  {{
-    "title": "Product Manager",
-    "location": "Remote",
-    "url": "https://example.com/jobs/456",
-    "department": "Product"
-  }}
+  {{"title": "Job Title Here", "location": "City", "url": "https://...", "department": null}}
 ]
 ```
 
-Important:
-- Return ONLY valid JSON array
-- If no jobs found, return empty array: []
-- Make sure URLs are absolute (include domain)
-- Extract ALL visible job listings
+RULES:
+1. Extract EVERY job listing you find
+2. Return valid JSON only, no extra text
+3. Empty array [] if no jobs found
+4. Use full URLs (include https://domain)
 
-JSON output:
+JSON:
 """
 
 SYSTEM_PROMPT = """You are a helpful assistant specialized in web scraping and data extraction.

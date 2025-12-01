@@ -29,20 +29,20 @@ class OllamaProvider(BaseLLMProvider):
         self.client = httpx.AsyncClient(timeout=timeout)
 
     async def complete(self, prompt: str, system: Optional[str] = None) -> str:
-        """Генерация ответа через Ollama API."""
+        """Generate response via Ollama API."""
+        from .prompts import SYSTEM_PROMPT
+        
         payload = {
             "model": self.model,
             "prompt": prompt,
+            "system": system or SYSTEM_PROMPT,
             "stream": False,
             "options": {
-                "temperature": 0.1,  # Низкая температура для более точных ответов
-                "num_predict": 4000,  # Увеличен лимит токенов
-                "num_ctx": 8192,  # Размер контекста
+                "temperature": 0.0,  # Zero temperature for deterministic output
+                "num_predict": 4096,  # Max output tokens
+                "num_ctx": 32768,  # Large context window for HTML content
             },
         }
-
-        if system:
-            payload["system"] = system
 
         try:
             response = await self.client.post(

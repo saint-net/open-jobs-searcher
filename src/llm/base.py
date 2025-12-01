@@ -1,13 +1,19 @@
-"""Базовый класс для LLM провайдеров."""
+"""Base class for LLM providers."""
 
-from abc import ABC, abstractmethod
 import json
+import logging
 import re
+from abc import ABC, abstractmethod
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class BaseLLMProvider(ABC):
-    """Абстрактный базовый класс для LLM провайдеров."""
+    """Abstract base class for LLM providers."""
+    
+    # Retry settings for job extraction
+    MAX_EXTRACTION_RETRIES = 3
 
     @abstractmethod
     async def complete(self, prompt: str, system: Optional[str] = None) -> str:
@@ -80,38 +86,72 @@ class BaseLLMProvider(ABC):
 
     async def extract_jobs(self, html: str, url: str) -> list[dict]:
         """
-        Извлечь список вакансий из HTML страницы.
+        Extract job listings from HTML page with retry logic.
 
         Args:
-            html: HTML содержимое страницы с вакансиями
-            url: URL страницы
+            html: HTML content of the careers page
+            url: URL of the page
 
         Returns:
-            Список вакансий в формате dict
+            List of job dictionaries
         """
         from .prompts import EXTRACT_JOBS_PROMPT
         
-        # Сначала пробуем найти JSON данные в script тегах (SSR/schema.org)
+        # First try to find JSON data in script tags (SSR/schema.org)
         json_jobs = self._extract_json_from_scripts(html)
         if json_jobs:
+            logger.debug(f"Found {len(json_jobs)} jobs from schema.org data")
             return json_jobs
         
-        # Очищаем HTML от скриптов и стилей для уменьшения размера
+        # Clean HTML from scripts and styles
         clean_html = self._clean_html(html)
 
-        # Ограничиваем размер HTML (80000 символов — для страниц с большим количеством контента)
+        # Limit HTML size (80000 chars for large pages)
         html_truncated = clean_html[:80000] if len(clean_html) > 80000 else clean_html
+        
+        logger.debug(f"Extracting jobs from {url}, HTML size: {len(html_truncated)} chars")
 
         prompt = EXTRACT_JOBS_PROMPT.format(
             url=url,
             html=html_truncated,
         )
 
-        response = await self.complete(prompt)
+        # Retry extraction if result is empty (LLM can be inconsistent)
+        for attempt in range(self.MAX_EXTRACTION_RETRIES):
+            response = await self.complete(prompt)
+            jobs = self._extract_json(response)
+            
+            if isinstance(jobs, list) and len(jobs) > 0:
+                # Validate job structure
+                valid_jobs = self._validate_jobs(jobs)
+                if valid_jobs:
+                    logger.debug(f"Extracted {len(valid_jobs)} jobs on attempt {attempt + 1}")
+                    return valid_jobs
+            
+            if attempt < self.MAX_EXTRACTION_RETRIES - 1:
+                logger.debug(f"Extraction attempt {attempt + 1} returned no jobs, retrying...")
         
-        # Парсим JSON из ответа
-        jobs = self._extract_json(response)
-        return jobs if isinstance(jobs, list) else []
+        logger.warning(f"Failed to extract jobs from {url} after {self.MAX_EXTRACTION_RETRIES} attempts")
+        return []
+    
+    def _validate_jobs(self, jobs: list) -> list[dict]:
+        """Validate and filter job entries."""
+        valid_jobs = []
+        for job in jobs:
+            if not isinstance(job, dict):
+                continue
+            # Must have at least a title
+            if not job.get("title"):
+                continue
+            # Clean up and normalize
+            valid_job = {
+                "title": str(job.get("title", "")).strip(),
+                "location": str(job.get("location", "Unknown")).strip() or "Unknown",
+                "url": str(job.get("url", "")).strip(),
+                "department": job.get("department"),
+            }
+            valid_jobs.append(valid_job)
+        return valid_jobs
 
     def _extract_json_from_scripts(self, html: str) -> list[dict]:
         """Попытка извлечь JSON с вакансиями из script тегов (SSR/hydration)."""
