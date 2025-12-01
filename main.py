@@ -131,6 +131,12 @@ def website(
         ...,
         help="URL сайта компании (например, https://company.com)",
     ),
+    browser: bool = typer.Option(
+        False,
+        "--browser",
+        "-b",
+        help="Использовать браузер для загрузки (для SPA сайтов)",
+    ),
     provider: str = typer.Option(
         "ollama",
         "--provider",
@@ -159,10 +165,12 @@ def website(
     """Поиск вакансий на сайте компании с помощью LLM."""
     console.print(f"[bold blue]🌐 Сайт:[/bold blue] {url}")
     console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({model})")
+    if browser:
+        console.print(f"[bold blue]🌐 Режим:[/bold blue] браузер (Playwright)")
     console.print()
 
     # Запускаем асинхронный поиск
-    jobs = asyncio.run(_search_website(url, provider, model))
+    jobs = asyncio.run(_search_website(url, provider, model, browser))
 
     # Отображаем результаты
     display_jobs(jobs)
@@ -172,7 +180,7 @@ def website(
         save_jobs(jobs, output, format)
 
 
-async def _search_website(url: str, provider: str, model: str) -> list:
+async def _search_website(url: str, provider: str, model: str, use_browser: bool) -> list:
     """Асинхронный поиск вакансий на сайте."""
     try:
         llm = get_llm_provider(provider, model=model)
@@ -180,9 +188,10 @@ async def _search_website(url: str, provider: str, model: str) -> list:
         console.print(f"[red]✗[/red] Ошибка инициализации LLM: {e}")
         return []
 
-    async with WebsiteSearcher(llm) as searcher:
+    async with WebsiteSearcher(llm, use_browser=use_browser) as searcher:
         try:
-            with console.status("[bold green]Анализирую сайт..."):
+            status_msg = "[bold green]Анализирую сайт через браузер..." if use_browser else "[bold green]Анализирую сайт..."
+            with console.status(status_msg):
                 jobs = await searcher.search(keywords=url)
             
             if jobs:

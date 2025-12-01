@@ -32,14 +32,25 @@ class WebsiteSearcher(BaseSearcher):
         r'/работа',
     ]
 
-    def __init__(self, llm_provider: BaseLLMProvider):
+    def __init__(
+        self,
+        llm_provider: BaseLLMProvider,
+        use_browser: bool = False,
+        headless: bool = True,
+    ):
         """
         Инициализация поисковика.
 
         Args:
             llm_provider: Провайдер LLM для анализа страниц
+            use_browser: Использовать Playwright для загрузки страниц (для SPA)
+            headless: Запускать браузер без GUI (только если use_browser=True)
         """
         self.llm = llm_provider
+        self.use_browser = use_browser
+        self.headless = headless
+        self._browser_loader = None
+
         self.client = httpx.AsyncClient(
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -49,6 +60,14 @@ class WebsiteSearcher(BaseSearcher):
             follow_redirects=True,
             timeout=30.0,
         )
+
+    async def _get_browser_loader(self):
+        """Получить или создать BrowserLoader."""
+        if self._browser_loader is None:
+            from src.browser import BrowserLoader
+            self._browser_loader = BrowserLoader(headless=self.headless)
+            await self._browser_loader.start()
+        return self._browser_loader
 
     async def search(
         self,
@@ -92,21 +111,15 @@ class WebsiteSearcher(BaseSearcher):
             careers_url = await self.llm.find_careers_url(html, url)
 
         if not careers_url or careers_url == "NOT_FOUND":
-            return []
+            # Пробуем альтернативные URL напрямую
+            careers_url = await self._try_alternative_urls(url)
+            if not careers_url:
+                return []
 
         # 4. Загружаем страницу вакансий
         careers_html = await self._fetch(careers_url)
         if not careers_html:
-            # Пробуем альтернативные URL
-            alt_urls = self._generate_alternative_urls(url)
-            for alt_url in alt_urls:
-                careers_html = await self._fetch(alt_url)
-                if careers_html:
-                    careers_url = alt_url
-                    break
-            
-            if not careers_html:
-                return []
+            return []
 
         # 5. Извлекаем вакансии с помощью LLM
         jobs_data = await self.llm.extract_jobs(careers_html, careers_url)
@@ -135,16 +148,38 @@ class WebsiteSearcher(BaseSearcher):
 
     async def _fetch(self, url: str) -> Optional[str]:
         """Загрузить HTML страницы."""
+        if self.use_browser:
+            return await self._fetch_with_browser(url)
+        return await self._fetch_with_httpx(url)
+
+    async def _fetch_with_httpx(self, url: str) -> Optional[str]:
+        """Загрузить HTML через httpx (быстро, но без JS)."""
         try:
             response = await self.client.get(url)
             response.raise_for_status()
             return response.text
-        except httpx.HTTPStatusError as e:
-            print(f"HTTP error {e.response.status_code} for {url}")
+        except httpx.HTTPStatusError:
             return None
-        except httpx.RequestError as e:
-            print(f"Request error for {url}: {e}")
+        except httpx.RequestError:
             return None
+
+    async def _fetch_with_browser(self, url: str) -> Optional[str]:
+        """Загрузить HTML через Playwright (медленно, но с JS)."""
+        try:
+            loader = await self._get_browser_loader()
+            return await loader.fetch(url)
+        except Exception as e:
+            print(f"Browser fetch error: {e}")
+            return None
+
+    async def _try_alternative_urls(self, base_url: str) -> Optional[str]:
+        """Попробовать альтернативные URL для страницы вакансий."""
+        alternatives = self._generate_alternative_urls(base_url)
+        for alt_url in alternatives:
+            html = await self._fetch(alt_url)
+            if html:
+                return alt_url
+        return None
 
     def _find_careers_url_heuristic(self, html: str, base_url: str) -> Optional[str]:
         """Эвристический поиск ссылки на страницу вакансий."""
@@ -200,8 +235,10 @@ class WebsiteSearcher(BaseSearcher):
         return alternatives
 
     async def close(self):
-        """Закрыть HTTP клиент и LLM провайдер."""
+        """Закрыть HTTP клиент, браузер и LLM провайдер."""
         await self.client.aclose()
+        if self._browser_loader:
+            await self._browser_loader.stop()
         await self.llm.close()
 
     async def __aenter__(self):
@@ -209,4 +246,3 @@ class WebsiteSearcher(BaseSearcher):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
-

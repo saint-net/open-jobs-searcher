@@ -34,6 +34,12 @@ pip install -r requirements.txt
 ollama pull gpt-oss:20b
 ```
 
+### Для SPA сайтов (Playwright)
+
+```bash
+playwright install chromium
+```
+
 ## Использование
 
 ### Поиск на HeadHunter
@@ -60,6 +66,9 @@ python main.py website https://example.com
 
 # С указанием модели
 python main.py website https://company.ru --model llama3.2
+
+# Для SPA сайтов (React/Vue/Angular) используйте --browser
+python main.py website https://company.ru --browser
 
 # Сохранить результаты
 python main.py website https://company.ru --output jobs.json
@@ -92,6 +101,7 @@ python main.py search "Python" --output results.csv --format csv
 
 | Опция | Описание |
 |-------|----------|
+| `--browser, -b` | Использовать браузер Playwright (для SPA сайтов) |
 | `--provider, -p` | LLM провайдер: `ollama`, `openai`, `claude` |
 | `--model, -m` | Модель LLM (по умолчанию `gpt-oss:20b`) |
 | `--output, -o` | Путь для сохранения результатов |
@@ -108,6 +118,7 @@ open-jobs-searcher/
 │   ├── config.py        # Настройки приложения
 │   ├── models.py        # Модели данных
 │   ├── output.py        # Вывод результатов
+│   ├── browser.py       # Playwright загрузчик (SPA)
 │   ├── llm/             # LLM провайдеры
 │   │   ├── base.py      # Базовый класс LLM
 │   │   ├── ollama.py    # Ollama провайдер
