@@ -50,6 +50,34 @@ class BaseLLMProvider(ABC):
         url = self._extract_url(response, base_url)
         return url
 
+    async def find_careers_url_from_sitemap(self, urls: list[str], base_url: str) -> Optional[str]:
+        """
+        Найти страницу вакансий среди URL из sitemap.xml с помощью LLM.
+
+        Args:
+            urls: Список URL из sitemap
+            base_url: Базовый URL сайта
+
+        Returns:
+            URL страницы с вакансиями или None
+        """
+        from .prompts import FIND_CAREERS_FROM_SITEMAP_PROMPT
+
+        # Ограничиваем количество URL (берём первые 500)
+        urls_limited = urls[:500]
+        urls_text = "\n".join(urls_limited)
+
+        prompt = FIND_CAREERS_FROM_SITEMAP_PROMPT.format(
+            base_url=base_url,
+            urls=urls_text,
+        )
+
+        response = await self.complete(prompt)
+        
+        # Извлекаем URL из ответа
+        url = self._extract_url(response, base_url)
+        return url
+
     async def extract_jobs(self, html: str, url: str) -> list[dict]:
         """
         Извлечь список вакансий из HTML страницы.

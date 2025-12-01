@@ -206,6 +206,8 @@ class WebsiteSearcher(BaseSearcher):
             f"{base}/sitemap-index.xml",
         ]
         
+        all_urls = []  # Собираем все URL для LLM fallback
+        
         for sitemap_url in sitemap_urls:
             try:
                 response = await self.client.get(sitemap_url)
@@ -217,8 +219,9 @@ class WebsiteSearcher(BaseSearcher):
                 # Парсим XML
                 root = ET.fromstring(xml_content)
                 
-                # Namespace для sitemap
-                ns = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+                # Определяем namespace из корневого тега (может быть http или https)
+                root_ns = root.tag.split('}')[0].strip('{') if '}' in root.tag else ''
+                ns = {'sm': root_ns} if root_ns else {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
                 
                 # Ищем URL с карьерными паттернами
                 urls = []
@@ -246,7 +249,10 @@ class WebsiteSearcher(BaseSearcher):
                         if url_elem.text:
                             urls.append(url_elem.text)
                 
-                # Ищем URL с карьерными паттернами
+                # Сохраняем для LLM fallback
+                all_urls.extend(urls)
+                
+                # Ищем URL с карьерными паттернами (быстрый regex)
                 for page_url in urls:
                     for pattern in self.CAREER_PATTERNS:
                         if re.search(pattern, page_url, re.IGNORECASE):
@@ -254,6 +260,10 @@ class WebsiteSearcher(BaseSearcher):
                             
             except (httpx.RequestError, ET.ParseError):
                 continue
+        
+        # Fallback: используем LLM для анализа URL из sitemap
+        if all_urls:
+            return await self.llm.find_careers_url_from_sitemap(all_urls, base_url)
         
         return None
 
