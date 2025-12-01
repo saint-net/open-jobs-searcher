@@ -19,6 +19,7 @@ class WebsiteSearcher(BaseSearcher):
 
     # Типичные паттерны URL для страниц с вакансиями
     CAREER_PATTERNS = [
+        # English
         r'/career[s]?',
         r'/job[s]?',
         r'/vacanc(?:y|ies)',
@@ -27,6 +28,15 @@ class WebsiteSearcher(BaseSearcher):
         r'/join',
         r'/hiring',
         r'/positions',
+        # German (DE/AT)
+        r'/karriere',
+        r'/stellen',
+        r'/stellenangebote',
+        r'/jobangebote',
+        r'/arbeiten',
+        r'/bewerben',
+        r'/offene-stellen',
+        # Russian
         r'/вакансии',
         r'/карьера',
         r'/работа',
@@ -196,8 +206,13 @@ class WebsiteSearcher(BaseSearcher):
             
             # Проверяем текст ссылки
             career_keywords = [
+                # English
                 'career', 'careers', 'jobs', 'vacancies', 'openings',
                 'join us', 'work with us', 'we\'re hiring',
+                # German
+                'karriere', 'stellen', 'stellenangebote', 'jobangebote',
+                'offene stellen', 'arbeiten bei uns', 'jetzt bewerben',
+                # Russian
                 'вакансии', 'карьера', 'работа у нас', 'присоединяйся',
             ]
             for keyword in career_keywords:
@@ -222,6 +237,7 @@ class WebsiteSearcher(BaseSearcher):
         """Генерировать альтернативные URL для страницы вакансий."""
         base = base_url.rstrip('/')
         alternatives = [
+            # English
             f"{base}/careers",
             f"{base}/jobs",
             f"{base}/vacancies",
@@ -230,7 +246,15 @@ class WebsiteSearcher(BaseSearcher):
             f"{base}/team",
             f"{base}/about/careers",
             f"{base}/en/careers",
+            # German
+            f"{base}/karriere",
+            f"{base}/stellen",
+            f"{base}/stellenangebote",
+            f"{base}/offene-stellen",
+            f"{base}/de/karriere",
+            # Russian
             f"{base}/ru/careers",
+            f"{base}/vacancies",
         ]
         return alternatives
 
