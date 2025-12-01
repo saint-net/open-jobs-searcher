@@ -99,8 +99,8 @@ class BaseLLMProvider(ABC):
         # Очищаем HTML от скриптов и стилей для уменьшения размера
         clean_html = self._clean_html(html)
 
-        # Ограничиваем размер HTML (30000 символов — достаточно для большинства страниц)
-        html_truncated = clean_html[:30000] if len(clean_html) > 30000 else clean_html
+        # Ограничиваем размер HTML (80000 символов — для страниц с большим количеством контента)
+        html_truncated = clean_html[:80000] if len(clean_html) > 80000 else clean_html
 
         prompt = EXTRACT_JOBS_PROMPT.format(
             url=url,

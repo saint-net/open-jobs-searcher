@@ -22,17 +22,19 @@ class WebsiteSearcher(BaseSearcher):
 
     name = "website"
 
-    # Типичные паттерны URL для страниц с вакансиями
+    # URL patterns for career pages
     CAREER_PATTERNS = [
         # English
         r'/career[s]?',
         r'/job[s]?',
         r'/vacanc(?:y|ies)',
         r'/opening[s]?',
-        r'/work',
-        r'/join',
+        r'/work[-_]?with[-_]?us',
+        r'/join[-_]?us',
+        r'/join[-_]?our[-_]?team',
         r'/hiring',
         r'/positions',
+        r'/people[-_]?(?:and[-_]?)?jobs',
         # German (DE/AT)
         r'/karriere',
         r'/stellen',
@@ -40,7 +42,7 @@ class WebsiteSearcher(BaseSearcher):
         r'/jobangebote',
         r'/arbeiten',
         r'/bewerben',
-        r'/offene-stellen',
+        r'/offene[-_]?stellen',
         # Russian
         r'/вакансии',
         r'/карьера',
@@ -246,17 +248,29 @@ class WebsiteSearcher(BaseSearcher):
                 # Ищем URL с карьерными паттернами
                 urls = []
                 
-                # Проверяем, это sitemap index или обычный sitemap
+                # Check if this is a sitemap index
                 sitemaps = root.findall('.//sm:sitemap/sm:loc', ns)
                 if sitemaps:
-                    # Это sitemap index — ищем вложенный sitemap с вакансиями
+                    # Prioritize sitemaps: career-related first, then page/general
+                    priority_sitemaps = []
+                    page_sitemaps = []
+                    other_sitemaps = []
+                    
                     for sitemap in sitemaps:
                         loc = sitemap.text
-                        if loc and any(re.search(p, loc, re.IGNORECASE) for p in self.CAREER_PATTERNS):
-                            # Загружаем вложенный sitemap
-                            nested_url = await self._find_careers_url_from_sitemap(loc)
-                            if nested_url:
-                                return nested_url
+                        if not loc:
+                            continue
+                        if any(re.search(p, loc, re.IGNORECASE) for p in self.CAREER_PATTERNS):
+                            priority_sitemaps.append(loc)
+                        elif 'page' in loc.lower():
+                            page_sitemaps.append(loc)
+                        else:
+                            other_sitemaps.append(loc)
+                    
+                    # Load priority sitemaps (career-related + page sitemap)
+                    for sitemap_loc in priority_sitemaps + page_sitemaps:
+                        nested_urls = await self._parse_sitemap_urls(sitemap_loc)
+                        all_urls.extend(nested_urls)
                 
                 # Ищем URL страниц
                 for url_elem in root.findall('.//sm:url/sm:loc', ns):
@@ -269,19 +283,26 @@ class WebsiteSearcher(BaseSearcher):
                         if url_elem.text:
                             urls.append(url_elem.text)
                 
-                # Сохраняем для LLM fallback
+                # Save for LLM fallback
                 all_urls.extend(urls)
-                
-                # Search for career patterns (fast regex)
-                for page_url in urls:
-                    for pattern in self.CAREER_PATTERNS:
-                        if re.search(pattern, page_url, re.IGNORECASE):
-                            logger.debug(f"Found careers URL in sitemap: {page_url}")
-                            return page_url
                             
             except ET.ParseError as e:
                 logger.debug(f"XML parse error for {sitemap_url}: {e}")
                 continue
+        
+        # Find all URLs matching career patterns
+        matching_urls = []
+        for page_url in all_urls:
+            for pattern in self.CAREER_PATTERNS:
+                if re.search(pattern, page_url, re.IGNORECASE):
+                    matching_urls.append(page_url)
+                    break
+        
+        if matching_urls:
+            # Score URLs to find the best careers page (not individual job pages)
+            best_url = self._select_best_careers_url(matching_urls)
+            logger.debug(f"Found careers URL in sitemap: {best_url} (from {len(matching_urls)} matches)")
+            return best_url
         
         # Fallback: use LLM to analyze sitemap URLs
         if all_urls:
@@ -289,6 +310,73 @@ class WebsiteSearcher(BaseSearcher):
             return await self.llm.find_careers_url_from_sitemap(all_urls, base_url)
         
         return None
+
+    def _select_best_careers_url(self, urls: list[str]) -> str:
+        """Select the best careers page URL from a list of candidates."""
+        # Job listing page endings (most specific - actual job lists)
+        job_listing_endings = [
+            '/jobs', '/vacancies', '/openings', '/careers',
+            '/stellenangebote', '/offene-stellen', '/stellen',
+            '/вакансии',
+        ]
+        
+        # General careers section endings (parent pages)
+        general_careers_endings = [
+            '/career', '/karriere', '/people-jobs', '/people-and-jobs',
+            '/карьера', '/работа',
+        ]
+        
+        def score_url(url: str) -> tuple:
+            """Score URL: lower is better. Returns (priority, -specificity, path_depth, length)."""
+            path = urlparse(url).path.rstrip('/')
+            segments = [s for s in path.split('/') if s]
+            
+            # Priority 0: URL ends with job listing pattern (most specific)
+            for ending in job_listing_endings:
+                if path.endswith(ending):
+                    return (0, 0, len(segments), len(url))
+            
+            # Priority 1: URL ends with general careers pattern
+            for ending in general_careers_endings:
+                if path.endswith(ending):
+                    return (1, 0, len(segments), len(url))
+            
+            # Priority 2: URL contains career pattern with short slug (category)
+            last_segment = segments[-1] if segments else ''
+            if len(last_segment) < 30:
+                return (2, 0, len(segments), len(url))
+            
+            # Priority 3: Long slugs (specific job pages)
+            return (3, 0, len(segments), len(url))
+        
+        return min(urls, key=score_url)
+
+    async def _parse_sitemap_urls(self, sitemap_url: str) -> list[str]:
+        """Parse URLs from a single sitemap file."""
+        urls = []
+        try:
+            response = await self._fetch_with_httpx_retry(sitemap_url)
+            root = ET.fromstring(response.text)
+            
+            # Detect namespace
+            root_ns = root.tag.split('}')[0].strip('{') if '}' in root.tag else ''
+            ns = {'sm': root_ns} if root_ns else {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+            
+            # Extract URLs
+            for url_elem in root.findall('.//sm:url/sm:loc', ns):
+                if url_elem.text:
+                    urls.append(url_elem.text)
+            
+            # Try without namespace
+            if not urls:
+                for url_elem in root.findall('.//url/loc'):
+                    if url_elem.text:
+                        urls.append(url_elem.text)
+                        
+        except (httpx.HTTPStatusError, httpx.RequestError, ET.ParseError) as e:
+            logger.debug(f"Failed to parse sitemap {sitemap_url}: {e}")
+        
+        return urls
 
     def _find_careers_url_heuristic(self, html: str, base_url: str) -> Optional[str]:
         """Heuristic search for careers page link in HTML."""
@@ -356,6 +444,9 @@ class WebsiteSearcher(BaseSearcher):
             f"{base}/ueber-uns/karriere",
             f"{base}/unternehmen/karriere",
             f"{base}/jobs-karriere",
+            f"{base}/people-jobs",
+            f"{base}/people-jobs/offene-stellen",
+            f"{base}/people-and-jobs",
             # Russian
             f"{base}/ru/careers",
             f"{base}/o-kompanii/vakansii",
