@@ -63,6 +63,7 @@ class WebsiteSearcher(BaseSearcher):
         (r'\.bamboohr\.com/jobs', r'bamboohr'),  # BambooHR
         (r'\.ashbyhq\.com', r'ashby'),  # Ashby
         (r'\.factorial\.co/job_posting', r'factorial'),  # Factorial
+        (r'\.pi-asp\.de/bewerber-web', r'pi-asp'),  # PI-ASP Bewerber Web (German job portal)
     ]
 
     def __init__(
@@ -171,8 +172,11 @@ class WebsiteSearcher(BaseSearcher):
                 external_board_url = self._find_external_job_board(careers_html)
                 if external_board_url:
                     logger.info(f"Found external job board: {external_board_url}")
-                    # Загружаем внешний job board
-                    external_html = await self._fetch(external_board_url)
+                    # Загружаем внешний job board через браузер (многие SPA)
+                    if self.use_browser:
+                        external_html = await self._fetch_with_browser(external_board_url)
+                    else:
+                        external_html = await self._fetch_with_httpx(external_board_url)
                     if external_html:
                         careers_html = external_html
                         variant_url = external_board_url

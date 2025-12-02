@@ -33,24 +33,28 @@ HTML:
 TASK: Find ALL job postings and extract them as JSON.
 
 Look for job titles in:
-- Headings (h1, h2, h3, h4)
+- Headings (h1, h2, h3, h4) - these often contain job titles
 - List items with job names
 - Cards or grid items with position titles
-- Links to job detail pages
+- Links to job detail pages (href containing /karriere/, /jobs/, /career/, etc.)
 - Accordion/expandable sections with job categories
 - Department names that represent open positions
+- Repeated structures with job information (data-layout="jobs", class="job-*", etc.)
+- Containers with data-entries attribute showing job count
 
-Common patterns:
-- <h3>Software Developer (m/w/d)</h3>
-- <a href="/jobs/123">Senior Engineer</a>
+Common HTML patterns for jobs:
+- <h2>Software Developer (m/w/d)</h2>
+- <h3>Senior Engineer</h3> followed by <h6>Company Name</h6>
+- <a href="/karriere/job-title">Weiterlesen</a> or <a href="/jobs/123">Apply</a>
 - <div class="job-title">Product Manager</div>
-- Department/category headings like "Technical Support", "Programming", "Sales"
+- <div data-layout="jobs">...</div> containing job cards
+- Structures with "m/w/d" or "m/f/d" gender notation indicate job listings
 
 For EACH job found, extract:
-- title: The job title exactly as written
+- title: The job title exactly as written (from h2, h3, or similar heading)
 - location: City/region or "Remote" or "Unknown"  
-- url: Full URL to job details (combine with {url} if relative), or page URL if no specific link
-- department: Department if mentioned, otherwise null
+- url: Full URL to job details (combine base URL with href if relative), or page URL if no specific link
+- department: Department/company if mentioned (often in h4 or h6), otherwise null
 
 OUTPUT FORMAT - Return ONLY a JSON array:
 ```json
@@ -60,11 +64,12 @@ OUTPUT FORMAT - Return ONLY a JSON array:
 ```
 
 RULES:
-1. Extract EVERY job listing you find
+1. Extract EVERY job listing you find - even if only 1-3 jobs exist
 2. If page shows department/category names (e.g., "Technical Support", "Programming") as hiring areas, treat them as job openings
 3. Return valid JSON only, no extra text
 4. Empty array [] ONLY if the page has NO job-related content at all
 5. Use full URLs (include https://domain)
+6. Look for "Weiterlesen" (German for "Read more") links - they often point to job details
 
 JSON:
 """

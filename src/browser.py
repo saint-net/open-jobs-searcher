@@ -101,9 +101,9 @@ class BrowserLoader:
         try:
             page = await self._browser.new_page()
             
-            # Устанавливаем User-Agent
+            # Устанавливаем User-Agent (полный, чтобы избежать блокировок)
             await page.set_extra_http_headers({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             })
 
             # Загружаем страницу (domcontentloaded быстрее чем networkidle)
@@ -168,7 +168,7 @@ class BrowserLoader:
             page = await self._browser.new_page()
             
             await page.set_extra_http_headers({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             })
 
             response = await page.goto(url, timeout=self.timeout, wait_until="domcontentloaded")
