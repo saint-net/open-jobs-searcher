@@ -74,6 +74,25 @@ You analyze HTML content and extract structured information accurately.
 Always respond with precise, structured data in the requested format.
 """
 
+TRANSLATE_JOB_TITLES_PROMPT = """Translate the following job titles to English.
+
+Job titles (one per line):
+{titles}
+
+RULES:
+1. Return ONLY a JSON array with translated titles in the same order
+2. Keep the translation professional and accurate
+3. If a title is already in English, keep it unchanged
+4. Preserve any gender notations like (m/w/d) or (m/f/d)
+
+OUTPUT FORMAT - Return ONLY a JSON array:
+```json
+["Translated Title 1", "Translated Title 2", ...]
+```
+
+JSON:
+"""
+
 FIND_CAREERS_FROM_SITEMAP_PROMPT = """You are analyzing a list of URLs from a website's sitemap.xml to find the careers/jobs page.
 
 Base URL: {base_url}

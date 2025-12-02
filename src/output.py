@@ -24,6 +24,7 @@ def display_jobs(jobs: list[Job], detailed: bool = False) -> None:
 
     table.add_column("Компания", style="cyan", max_width=25)
     table.add_column("Вакансия", style="green", max_width=35)
+    table.add_column("Title (EN)", style="bright_green", max_width=35)
     table.add_column("Локация", style="blue", max_width=15)
     table.add_column("Зарплата", style="yellow", max_width=20)
     table.add_column("Источник", style="magenta", max_width=10)
@@ -32,6 +33,7 @@ def display_jobs(jobs: list[Job], detailed: bool = False) -> None:
         table.add_row(
             job.company,
             job.title,
+            job.title_en or "—",
             job.location,
             job.salary_display,
             job.source,

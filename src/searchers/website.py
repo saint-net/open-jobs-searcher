@@ -146,7 +146,11 @@ class WebsiteSearcher(BaseSearcher):
             # 6. Извлекаем вакансии с помощью LLM
             jobs_data = await self.llm.extract_jobs(careers_html, careers_url)
 
-            # 7. Преобразуем в модели Job
+            # 7. Переводим названия вакансий на английский
+            titles = [job_data.get("title", "Unknown Position") for job_data in jobs_data]
+            titles_en = await self.llm.translate_job_titles(titles)
+
+            # 8. Преобразуем в модели Job
             jobs = []
             company_name = self._extract_company_name(url)
             
@@ -158,6 +162,7 @@ class WebsiteSearcher(BaseSearcher):
                     location=job_data.get("location", "Unknown"),
                     url=job_data.get("url", careers_url),
                     source=f"website:{urlparse(url).netloc}",
+                    title_en=titles_en[idx] if idx < len(titles_en) else None,
                     description=job_data.get("description"),
                 )
                 jobs.append(job)

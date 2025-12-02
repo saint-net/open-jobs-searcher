@@ -15,6 +15,7 @@ class Job:
     location: str
     url: str
     source: str
+    title_en: Optional[str] = None
     description: Optional[str] = None
     salary_from: Optional[int] = None
     salary_to: Optional[int] = None
@@ -30,6 +31,7 @@ class Job:
         return {
             "id": self.id,
             "title": self.title,
+            "title_en": self.title_en,
             "company": self.company,
             "location": self.location,
             "url": self.url,

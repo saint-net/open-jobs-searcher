@@ -84,6 +84,34 @@ class BaseLLMProvider(ABC):
         url = self._extract_url(response, base_url)
         return url
 
+    async def translate_job_titles(self, titles: list[str]) -> list[str]:
+        """
+        Translate job titles to English.
+
+        Args:
+            titles: List of job titles in any language
+
+        Returns:
+            List of translated titles in English
+        """
+        from .prompts import TRANSLATE_JOB_TITLES_PROMPT
+
+        if not titles:
+            return []
+
+        titles_text = "\n".join(titles)
+        prompt = TRANSLATE_JOB_TITLES_PROMPT.format(titles=titles_text)
+
+        response = await self.complete(prompt)
+        translated = self._extract_json(response)
+
+        if isinstance(translated, list) and len(translated) == len(titles):
+            return [str(t) for t in translated]
+        
+        # Fallback: return original titles if translation failed
+        logger.warning(f"Translation failed, returning original titles")
+        return titles
+
     async def extract_jobs(self, html: str, url: str) -> list[dict]:
         """
         Extract job listings from HTML page with retry logic.
