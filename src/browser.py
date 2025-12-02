@@ -1,9 +1,14 @@
 """Модуль для работы с браузером через Playwright."""
 
+import logging
+import re
 from typing import Optional
 from contextlib import asynccontextmanager
 
 from playwright.async_api import async_playwright, Browser, Page, Playwright
+
+
+logger = logging.getLogger(__name__)
 
 
 class DomainUnreachableError(Exception):
@@ -13,6 +18,25 @@ class DomainUnreachableError(Exception):
 
 class BrowserLoader:
     """Загрузчик страниц через headless браузер."""
+
+    # Паттерны для поиска ссылок на вакансии в SPA
+    JOB_LINK_PATTERNS = [
+        # English
+        r'current\s*opening',
+        r'view\s*all',
+        r'see\s*all',
+        r'all\s*jobs',
+        r'open\s*positions',
+        r'job\s*listings',
+        r'browse\s*jobs',
+        # German
+        r'alle\s*stellen',
+        r'offene\s*stellen',
+        r'stellenangebote',
+        # Russian
+        r'все\s*вакансии',
+        r'открытые\s*позиции',
+    ]
 
     def __init__(self, headless: bool = True, timeout: float = 30000):
         """
@@ -101,11 +125,144 @@ class BrowserLoader:
             ]):
                 raise DomainUnreachableError(f"Домен недоступен: {url}") from e
             
-            print(f"Browser error for {url}: {e}")
+            logger.warning(f"Browser error for {url}: {e}")
             return None
         finally:
             if page:
                 await page.close()
+
+    async def fetch_with_navigation(self, url: str, max_attempts: int = 2) -> Optional[str]:
+        """
+        Загрузить страницу и попытаться найти/перейти на страницу с вакансиями.
+        
+        Для SPA-сайтов (например, HiBob) вакансии могут находиться на отдельной 
+        "странице", доступной через навигацию (Current openings, View all и т.д.).
+        
+        Args:
+            url: URL страницы карьеры
+            max_attempts: Максимальное количество попыток навигации
+            
+        Returns:
+            HTML содержимое страницы с вакансиями или None
+        """
+        if self._browser is None:
+            await self.start()
+
+        page: Optional[Page] = None
+        try:
+            page = await self._browser.new_page()
+            
+            await page.set_extra_http_headers({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+
+            response = await page.goto(url, timeout=self.timeout, wait_until="domcontentloaded")
+            
+            if response is None or response.status >= 400:
+                return None
+
+            # Ждём начальный рендеринг
+            await page.wait_for_timeout(2000)
+            
+            # Получаем первоначальный HTML
+            html = await page.content()
+            
+            # Пытаемся найти ссылку на вакансии и кликнуть
+            for attempt in range(max_attempts):
+                job_link = await self._find_job_navigation_link(page)
+                
+                if job_link:
+                    logger.debug(f"Found job navigation link: {job_link}")
+                    try:
+                        # Кликаем на ссылку
+                        await job_link.click()
+                        # Ждём навигацию или обновление контента
+                        await page.wait_for_timeout(2500)
+                        
+                        # Получаем обновлённый HTML
+                        new_html = await page.content()
+                        
+                        # Проверяем, увеличился ли размер HTML (загрузился контент)
+                        if len(new_html) > len(html) * 1.2:  # Минимум 20% прирост
+                            logger.debug(f"Navigation succeeded, HTML size: {len(html)} -> {len(new_html)}")
+                            html = new_html
+                            break
+                        elif len(new_html) > len(html):
+                            html = new_html
+                    except Exception as e:
+                        logger.debug(f"Click failed: {e}")
+                else:
+                    break  # Нет ссылок для клика
+            
+            return html
+
+        except Exception as e:
+            error_str = str(e)
+            if any(err in error_str for err in [
+                "ERR_NAME_NOT_RESOLVED",
+                "ERR_CONNECTION_REFUSED",
+                "ERR_CONNECTION_RESET",
+                "ERR_CONNECTION_TIMED_OUT",
+                "ERR_NETWORK_CHANGED",
+                "ERR_INTERNET_DISCONNECTED",
+                "ERR_ADDRESS_UNREACHABLE",
+            ]):
+                raise DomainUnreachableError(f"Домен недоступен: {url}") from e
+            
+            logger.warning(f"Browser error for {url}: {e}")
+            return None
+        finally:
+            if page:
+                await page.close()
+
+    async def _find_job_navigation_link(self, page: Page):
+        """
+        Найти ссылку для навигации к списку вакансий на странице.
+        
+        Ищет кликабельные элементы с текстом типа:
+        - "Current openings"
+        - "View all"
+        - "All jobs"
+        и т.д.
+        
+        Returns:
+            Элемент для клика или None
+        """
+        # Ищем все потенциальные ссылки и кнопки
+        selectors = [
+            'a',
+            'button',
+            '[role="link"]',
+            '[role="button"]',
+            '[onclick]',
+            'span[class*="link"]',
+            'div[class*="nav"]',
+        ]
+        
+        for selector in selectors:
+            try:
+                elements = await page.query_selector_all(selector)
+                
+                for element in elements:
+                    try:
+                        text = await element.inner_text()
+                        if not text:
+                            continue
+                        
+                        text_lower = text.lower().strip()
+                        
+                        # Проверяем текст на соответствие паттернам
+                        for pattern in self.JOB_LINK_PATTERNS:
+                            if re.search(pattern, text_lower, re.IGNORECASE):
+                                # Проверяем, что элемент видим и кликабелен
+                                if await element.is_visible():
+                                    return element
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        
+        return None
 
     async def __aenter__(self):
         await self.start()

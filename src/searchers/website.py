@@ -138,13 +138,32 @@ class WebsiteSearcher(BaseSearcher):
                 if not careers_url:
                     return []
 
-            # 5. Загружаем страницу вакансий
-            careers_html = await self._fetch(careers_url)
+            # 5. Загружаем страницу вакансий (пробуем варианты URL: plural/singular)
+            jobs_data = []
+            careers_html = None
+            
+            for variant_url in self._generate_url_variants(careers_url):
+                # Для браузерного режима пробуем с навигацией к вакансиям (для SPA)
+                if self.use_browser:
+                    careers_html = await self._fetch_with_browser(variant_url, navigate_to_jobs=True)
+                else:
+                    careers_html = await self._fetch(variant_url)
+                
+                if not careers_html:
+                    continue
+                
+                # 6. Извлекаем вакансии с помощью LLM
+                jobs_data = await self.llm.extract_jobs(careers_html, variant_url)
+                
+                if jobs_data:
+                    careers_url = variant_url  # Update to the working URL
+                    logger.debug(f"Found {len(jobs_data)} jobs at {variant_url}")
+                    break
+                else:
+                    logger.debug(f"No jobs found at {variant_url}, trying next variant...")
+            
             if not careers_html:
                 return []
-
-            # 6. Извлекаем вакансии с помощью LLM
-            jobs_data = await self.llm.extract_jobs(careers_html, careers_url)
 
             # 7. Переводим названия вакансий на английский
             titles = [job_data.get("title", "Unknown Position") for job_data in jobs_data]
@@ -221,10 +240,17 @@ class WebsiteSearcher(BaseSearcher):
             logger.warning(f"Request failed after retries for {url}: {e}")
             return None
 
-    async def _fetch_with_browser(self, url: str) -> Optional[str]:
-        """Fetch HTML via Playwright (slow, with JS)."""
+    async def _fetch_with_browser(self, url: str, navigate_to_jobs: bool = False) -> Optional[str]:
+        """Fetch HTML via Playwright (slow, with JS).
+        
+        Args:
+            url: URL страницы
+            navigate_to_jobs: Попытаться найти и перейти на страницу вакансий (для SPA)
+        """
         try:
             loader = await self._get_browser_loader()
+            if navigate_to_jobs:
+                return await loader.fetch_with_navigation(url)
             return await loader.fetch(url)
         except DomainUnreachableError:
             raise  # Re-raise to handle at caller level
@@ -346,32 +372,47 @@ class WebsiteSearcher(BaseSearcher):
     def _select_best_careers_url(self, urls: list[str]) -> str:
         """Select the best careers page URL from a list of candidates."""
         # Job listing page endings (most specific - actual job lists)
+        # Plural forms first (jobs > job), then with .html extension
         job_listing_endings = [
-            '/jobs', '/vacancies', '/openings', '/careers',
-            '/stellenangebote', '/offene-stellen', '/stellen',
-            '/вакансии',
+            '/jobs', '/jobs.html', '/job', '/job.html',
+            '/vacancies', '/vacancies.html', '/vacancy', '/vacancy.html',
+            '/openings', '/openings.html', '/opening', '/opening.html',
+            '/careers', '/careers.html',
+            '/stellenangebote', '/stellenangebote.html',
+            '/offene-stellen', '/offene-stellen.html',
+            '/stellen', '/stellen.html',
+            '/вакансии', '/вакансии.html',
         ]
         
         # General careers section endings (parent pages)
         general_careers_endings = [
-            '/career', '/karriere', '/people-jobs', '/people-and-jobs',
-            '/карьера', '/работа',
+            '/career', '/career.html',
+            '/karriere', '/karriere.html',
+            '/people-jobs', '/people-jobs.html',
+            '/people-and-jobs', '/people-and-jobs.html',
+            '/карьера', '/карьера.html',
+            '/работа', '/работа.html',
         ]
         
         def score_url(url: str) -> tuple:
-            """Score URL: lower is better. Returns (priority, -specificity, path_depth, length)."""
+            """Score URL: lower is better. Returns (priority, ending_index, path_depth, length)."""
             path = urlparse(url).path.rstrip('/')
+            # Also handle .html extension for path matching
+            path_normalized = path.replace('.html', '')
             segments = [s for s in path.split('/') if s]
             
             # Priority 0: URL ends with job listing pattern (most specific)
-            for ending in job_listing_endings:
-                if path.endswith(ending):
-                    return (0, 0, len(segments), len(url))
+            # Earlier in list = better (plural forms first)
+            for idx, ending in enumerate(job_listing_endings):
+                ending_normalized = ending.replace('.html', '')
+                if path.endswith(ending) or path_normalized.endswith(ending_normalized):
+                    return (0, idx, len(segments), len(url))
             
             # Priority 1: URL ends with general careers pattern
-            for ending in general_careers_endings:
-                if path.endswith(ending):
-                    return (1, 0, len(segments), len(url))
+            for idx, ending in enumerate(general_careers_endings):
+                ending_normalized = ending.replace('.html', '')
+                if path.endswith(ending) or path_normalized.endswith(ending_normalized):
+                    return (1, idx, len(segments), len(url))
             
             # Priority 2: URL contains career pattern with short slug (category)
             last_segment = segments[-1] if segments else ''
@@ -382,6 +423,48 @@ class WebsiteSearcher(BaseSearcher):
             return (3, 0, len(segments), len(url))
         
         return min(urls, key=score_url)
+
+    def _generate_url_variants(self, url: str) -> list[str]:
+        """Generate plural/singular variants of a careers URL.
+        
+        If sitemap contains job.html, also try jobs.html and vice versa.
+        """
+        variants = [url]  # Original URL first
+        
+        # Singular -> plural mappings
+        singular_to_plural = {
+            '/job.html': '/jobs.html',
+            '/job': '/jobs',
+            '/vacancy.html': '/vacancies.html',
+            '/vacancy': '/vacancies',
+            '/opening.html': '/openings.html',
+            '/opening': '/openings',
+            '/career.html': '/careers.html',
+            '/career': '/careers',
+            '/stelle.html': '/stellen.html',
+            '/stelle': '/stellen',
+        }
+        
+        parsed = urlparse(url)
+        path = parsed.path
+        
+        # Try singular -> plural
+        for singular, plural in singular_to_plural.items():
+            if path.endswith(singular):
+                new_path = path[:-len(singular)] + plural
+                new_url = f"{parsed.scheme}://{parsed.netloc}{new_path}"
+                variants.append(new_url)
+                break
+        
+        # Try plural -> singular (less common but possible)
+        for singular, plural in singular_to_plural.items():
+            if path.endswith(plural):
+                new_path = path[:-len(plural)] + singular
+                new_url = f"{parsed.scheme}://{parsed.netloc}{new_path}"
+                variants.append(new_url)
+                break
+        
+        return variants
 
     async def _parse_sitemap_urls(self, sitemap_url: str) -> list[str]:
         """Parse URLs from a single sitemap file."""
@@ -456,22 +539,30 @@ class WebsiteSearcher(BaseSearcher):
         """Генерировать альтернативные URL для страницы вакансий."""
         base = base_url.rstrip('/')
         alternatives = [
-            # English
+            # English (with .html variants for static sites)
             f"{base}/careers",
+            f"{base}/careers.html",
             f"{base}/jobs",
+            f"{base}/jobs.html",
             f"{base}/vacancies",
+            f"{base}/vacancies.html",
             f"{base}/career",
+            f"{base}/career.html",
             f"{base}/join",
             f"{base}/team",
             f"{base}/about/careers",
             f"{base}/about-us/careers",
             f"{base}/company/careers",
             f"{base}/en/careers",
-            # German
+            # German (with .html variants)
             f"{base}/karriere",
+            f"{base}/karriere.html",
             f"{base}/stellen",
+            f"{base}/stellen.html",
             f"{base}/stellenangebote",
+            f"{base}/stellenangebote.html",
             f"{base}/offene-stellen",
+            f"{base}/offene-stellen.html",
             f"{base}/de/karriere",
             f"{base}/ueber-uns/karriere",
             f"{base}/unternehmen/karriere",
