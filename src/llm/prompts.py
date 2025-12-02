@@ -32,29 +32,32 @@ HTML:
 
 TASK: Find ALL job postings and extract them as JSON.
 
-Look for job titles in:
-- Headings (h1, h2, h3, h4) - these often contain job titles
-- List items with job names
-- Cards or grid items with position titles
-- Links to job detail pages (href containing /karriere/, /jobs/, /career/, etc.)
-- Accordion/expandable sections with job categories
-- Department names that represent open positions
-- Repeated structures with job information (data-layout="jobs", class="job-*", etc.)
-- Containers with data-entries attribute showing job count
+IMPORTANT: This page may have just 1-2 jobs or many jobs. Extract ALL of them, even if there's only ONE job posting!
 
-Common HTML patterns for jobs:
-- <h2>Software Developer (m/w/d)</h2>
-- <h3>Senior Engineer</h3> followed by <h6>Company Name</h6>
-- <a href="/karriere/job-title">Weiterlesen</a> or <a href="/jobs/123">Apply</a>
-- <div class="job-title">Product Manager</div>
-- <div data-layout="jobs">...</div> containing job cards
-- Structures with "m/w/d" or "m/f/d" gender notation indicate job listings
+Where to look for job titles:
+- <li> list items containing job names (very common!)
+- <a> links with job titles in text
+- Headings (h1, h2, h3, h4) with position names
+- Cards, divs with job information
+- Text near "Stellen ausgeschrieben" or "open positions"
+
+How to recognize a job title:
+- Contains "(m/w/d)" or "(m/f/d)" - DEFINITELY a job title!
+- Contains "WerkstudentIn", "PraktikantIn", "Manager", "Developer", "Engineer", etc.
+- German titles: "Werkstudent", "Praktikant", "Mitarbeiter", "Leiter", etc.
+- Located in list (<ul>/<li>) under text like "Aktuell haben wir folgende Stellen"
+
+Common HTML patterns:
+- <li>Werkstudent Sales (m/w/d)</li>
+- <a href="/karriere/werkstudent-sales">Werkstudent Sales (m/w/d)</a>
+- <h3>Software Developer (m/w/d)</h3>
+- Text containing "(m/w/d)" is ALWAYS a job posting
 
 For EACH job found, extract:
-- title: The job title exactly as written (from h2, h3, or similar heading)
+- title: The job title exactly as written
 - location: City/region or "Remote" or "Unknown"  
 - url: Full URL to job details (combine base URL with href if relative), or page URL if no specific link
-- department: Department/company if mentioned (often in h4 or h6), otherwise null
+- department: Department if mentioned, otherwise null
 
 OUTPUT FORMAT - Return ONLY a JSON array:
 ```json
@@ -64,12 +67,11 @@ OUTPUT FORMAT - Return ONLY a JSON array:
 ```
 
 RULES:
-1. Extract EVERY job listing you find - even if only 1-3 jobs exist
-2. If page shows department/category names (e.g., "Technical Support", "Programming") as hiring areas, treat them as job openings
+1. Extract EVERY job - even if there's only 1 job on the page!
+2. Anything with "(m/w/d)" or "(m/f/d)" is a job - extract it!
 3. Return valid JSON only, no extra text
-4. Empty array [] ONLY if the page has NO job-related content at all
+4. Empty array [] ONLY if absolutely NO jobs exist
 5. Use full URLs (include https://domain)
-6. Look for "Weiterlesen" (German for "Read more") links - they often point to job details
 
 JSON:
 """

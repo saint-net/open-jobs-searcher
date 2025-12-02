@@ -131,8 +131,11 @@ class BaseLLMProvider(ABC):
             logger.debug(f"Found {len(json_jobs)} jobs from schema.org data")
             return json_jobs
         
+        # Try to extract only the main content (where jobs usually are)
+        main_html = self._extract_main_content(html)
+        
         # Clean HTML from scripts and styles
-        clean_html = self._clean_html(html)
+        clean_html = self._clean_html(main_html)
 
         # Limit HTML size (80000 chars for large pages)
         html_truncated = clean_html[:80000] if len(clean_html) > 80000 else clean_html
@@ -230,14 +233,44 @@ class BaseLLMProvider(ABC):
             "department": data.get("industry", None),
         }
 
+    def _extract_main_content(self, html: str) -> str:
+        """Extract main content area from HTML (where jobs are usually located)."""
+        from bs4 import BeautifulSoup
+        
+        soup = BeautifulSoup(html, 'lxml')
+        
+        # Try to find main content container
+        main_selectors = [
+            'main',
+            '[role="main"]',
+            '#main',
+            '#content',
+            '.content',
+            'article',
+            '.main-content',
+            '.page-content',
+        ]
+        
+        for selector in main_selectors:
+            main = soup.select_one(selector)
+            if main and len(str(main)) > 500:  # Ensure it has meaningful content
+                logger.debug(f"Found main content via '{selector}', size: {len(str(main))} chars")
+                return str(main)
+        
+        # Fallback: return body or full HTML
+        body = soup.find('body')
+        if body:
+            return str(body)
+        return html
+
     def _clean_html(self, html: str) -> str:
         """Очистить HTML от скриптов, стилей и лишних атрибутов."""
         from bs4 import BeautifulSoup
         
         soup = BeautifulSoup(html, 'lxml')
         
-        # Удаляем ненужные теги полностью
-        for tag in soup.find_all(['script', 'style', 'svg', 'noscript', 'head', 'meta', 'link', 'iframe', 'nav', 'footer']):
+        # Удаляем ненужные теги полностью (но не nav/footer - могут содержать ссылки на вакансии)
+        for tag in soup.find_all(['script', 'style', 'svg', 'noscript', 'head', 'meta', 'link', 'iframe']):
             tag.decompose()
         
         # Удаляем комментарии
@@ -245,13 +278,24 @@ class BaseLLMProvider(ABC):
         for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
             comment.extract()
         
-        # Оставляем только важные атрибуты (href для ссылок)
+        # Сохраняем важные атрибуты, которые помогают понять структуру
+        keep_attrs = {'href', 'class', 'id', 'role', 'data-job', 'data-position'}
         for tag in soup.find_all(True):
-            # Сохраняем только href для ссылок
-            href = tag.get('href') if tag.name == 'a' else None
-            tag.attrs = {}
-            if href:
-                tag['href'] = href
+            # Фильтруем атрибуты
+            new_attrs = {}
+            for attr, value in tag.attrs.items():
+                if attr in keep_attrs:
+                    # Укорачиваем длинные классы
+                    if attr == 'class' and isinstance(value, list):
+                        # Оставляем только классы, связанные с job/career/position
+                        relevant = [c for c in value if any(k in c.lower() for k in ['job', 'career', 'position', 'vacancy', 'opening', 'title', 'list', 'item'])]
+                        if relevant:
+                            new_attrs[attr] = ' '.join(relevant[:3])  # Максимум 3 класса
+                    elif attr == 'href':
+                        new_attrs[attr] = value
+                    else:
+                        new_attrs[attr] = value
+            tag.attrs = new_attrs
         
         # Получаем очищенный HTML
         clean = str(soup)

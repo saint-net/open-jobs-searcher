@@ -115,18 +115,27 @@ class AsyncHttpClient:
         """
         Quick check if domain is reachable.
         
-        Uses HEAD request with short timeout.
+        Uses HEAD request with short timeout, falls back to GET if HEAD fails.
+        Some servers don't support HEAD or disconnect on HEAD requests.
         
         Args:
             url: URL to check
             
         Raises:
-            DomainUnreachableError: If domain is unreachable
+            DomainUnreachableError: If domain is unreachable (DNS/network issues)
         """
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.head(url, follow_redirects=True)
-                logger.debug(f"Domain check: {url} -> {response.status_code}")
+                # Try HEAD first (faster)
+                try:
+                    response = await client.head(url, follow_redirects=True)
+                    logger.debug(f"Domain check (HEAD): {url} -> {response.status_code}")
+                    return
+                except httpx.RequestError as head_error:
+                    # HEAD failed, try GET as fallback (some servers don't support HEAD)
+                    logger.debug(f"HEAD request failed for {url}, trying GET: {head_error}")
+                    response = await client.get(url, follow_redirects=True)
+                    logger.debug(f"Domain check (GET): {url} -> {response.status_code}")
         except httpx.ConnectError as e:
             error_str = str(e).lower()
             if any(err in error_str for err in self.CONNECTION_ERROR_PATTERNS):
@@ -134,8 +143,6 @@ class AsyncHttpClient:
             raise DomainUnreachableError(f"Не удалось подключиться к домену: {url}") from e
         except httpx.ConnectTimeout:
             raise DomainUnreachableError(f"Таймаут подключения к домену: {url}")
-        except httpx.RequestError as e:
-            raise DomainUnreachableError(f"Ошибка подключения к домену: {url} - {e}")
 
     async def close(self):
         """Close the HTTP client."""
