@@ -75,3 +75,5 @@ def save_jobs(
     console.print(f"[green]Результаты сохранены в {path}[/green]")
     return path
 
+
+

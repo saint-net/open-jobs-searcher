@@ -1,0 +1,21 @@
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'main.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'requirements.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/browser.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/config.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/llm/base.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/llm/ollama.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/llm/prompts.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/searchers/__init__.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/searchers/hh.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/searchers/website.py', LF will be replaced by CRLF the next time Git touches it
+ .gitignore            |  2 [32m++[m
+ pyproject.toml        |  2 [32m++[m
+ src/__init__.py       |  2 [32m++[m
+ src/llm/__init__.py   |  2 [32m++[m
+ src/llm/base.py       | 44 [32m++++++++++++++++++++++++[m[31m--------------------[m
+ src/llm/prompts.py    | 12 [32m++++++++[m[31m----[m
+ src/models.py         |  2 [32m++[m
+ src/output.py         |  2 [32m++[m
+ src/searchers/base.py |  2 [32m++[m
+ 9 files changed, 46 insertions(+), 24 deletions(-)

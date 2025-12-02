@@ -37,16 +37,19 @@ Look for job titles in:
 - List items with job names
 - Cards or grid items with position titles
 - Links to job detail pages
+- Accordion/expandable sections with job categories
+- Department names that represent open positions
 
 Common patterns:
 - <h3>Software Developer (m/w/d)</h3>
 - <a href="/jobs/123">Senior Engineer</a>
 - <div class="job-title">Product Manager</div>
+- Department/category headings like "Technical Support", "Programming", "Sales"
 
 For EACH job found, extract:
 - title: The job title exactly as written
 - location: City/region or "Remote" or "Unknown"  
-- url: Full URL to job details (combine with {url} if relative)
+- url: Full URL to job details (combine with {url} if relative), or page URL if no specific link
 - department: Department if mentioned, otherwise null
 
 OUTPUT FORMAT - Return ONLY a JSON array:
@@ -58,9 +61,10 @@ OUTPUT FORMAT - Return ONLY a JSON array:
 
 RULES:
 1. Extract EVERY job listing you find
-2. Return valid JSON only, no extra text
-3. Empty array [] if no jobs found
-4. Use full URLs (include https://domain)
+2. If page shows department/category names (e.g., "Technical Support", "Programming") as hiring areas, treat them as job openings
+3. Return valid JSON only, no extra text
+4. Empty array [] ONLY if the page has NO job-related content at all
+5. Use full URLs (include https://domain)
 
 JSON:
 """

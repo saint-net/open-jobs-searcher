@@ -60,3 +60,5 @@ class Job:
         else:
             return f"до {self.salary_to:,} {currency}"
 
+
+

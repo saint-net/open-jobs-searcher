@@ -203,33 +203,37 @@ class BaseLLMProvider(ABC):
         }
 
     def _clean_html(self, html: str) -> str:
-        """Очистить HTML от скриптов, стилей и лишних пробелов."""
-        import re
+        """Очистить HTML от скриптов, стилей и лишних атрибутов."""
+        from bs4 import BeautifulSoup
         
-        # Удаляем head секцию
-        html = re.sub(r'<head[^>]*>[\s\S]*?</head>', '', html, flags=re.IGNORECASE)
+        soup = BeautifulSoup(html, 'lxml')
         
-        # Удаляем script и style теги
-        html = re.sub(r'<script[^>]*>[\s\S]*?</script>', '', html, flags=re.IGNORECASE)
-        html = re.sub(r'<style[^>]*>[\s\S]*?</style>', '', html, flags=re.IGNORECASE)
-        
-        # Удаляем SVG (часто большие)
-        html = re.sub(r'<svg[^>]*>[\s\S]*?</svg>', '', html, flags=re.IGNORECASE)
-        
-        # Удаляем noscript
-        html = re.sub(r'<noscript[^>]*>[\s\S]*?</noscript>', '', html, flags=re.IGNORECASE)
+        # Удаляем ненужные теги полностью
+        for tag in soup.find_all(['script', 'style', 'svg', 'noscript', 'head', 'meta', 'link', 'iframe', 'nav', 'footer']):
+            tag.decompose()
         
         # Удаляем комментарии
-        html = re.sub(r'<!--[\s\S]*?-->', '', html)
+        from bs4 import Comment
+        for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+            comment.extract()
         
-        # Удаляем атрибуты data-* и style
-        html = re.sub(r'\s+data-[a-z-]+="[^"]*"', '', html, flags=re.IGNORECASE)
-        html = re.sub(r'\s+style="[^"]*"', '', html, flags=re.IGNORECASE)
+        # Оставляем только важные атрибуты (href для ссылок)
+        for tag in soup.find_all(True):
+            # Сохраняем только href для ссылок
+            href = tag.get('href') if tag.name == 'a' else None
+            tag.attrs = {}
+            if href:
+                tag['href'] = href
         
-        # Удаляем множественные пробелы
-        html = re.sub(r'\s+', ' ', html)
+        # Получаем очищенный HTML
+        clean = str(soup)
         
-        return html.strip()
+        # Удаляем множественные пробелы и переносы
+        import re
+        clean = re.sub(r'\s+', ' ', clean)
+        clean = re.sub(r'>\s+<', '><', clean)
+        
+        return clean.strip()
 
     def _extract_url(self, response: str, base_url: str) -> Optional[str]:
         """Извлечь URL из ответа LLM."""
