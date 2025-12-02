@@ -23,6 +23,7 @@ EXTERNAL_JOB_BOARDS = [
     (r'\.ashbyhq\.com', 'ashby'),
     (r'\.factorial\.co/job_posting', 'factorial'),
     (r'\.pi-asp\.de/bewerber-web', 'pi-asp'),
+    (r'job\.deloitte\.com', 'deloitte'),
 ]
 
 # URLs to skip when looking for job boards (privacy, imprint, etc.)
@@ -71,6 +72,7 @@ def _normalize_job_board_url(url: str, platform: str = None) -> str:
     - https://company.jobs.personio.com/job/123 -> https://company.jobs.personio.com/
     - https://job-boards.greenhouse.io/company/jobs/123 -> https://job-boards.greenhouse.io/company
     - https://boards.greenhouse.io/company/jobs/123 -> https://boards.greenhouse.io/company
+    - https://job.deloitte.com/search?search=27pilots -> https://job.deloitte.com/search?search=27pilots (keep as-is)
     """
     parsed = urlparse(url)
     
@@ -82,6 +84,11 @@ def _normalize_job_board_url(url: str, platform: str = None) -> str:
             company_slug = path_parts[0]
             return f"{parsed.scheme}://{parsed.netloc}/{company_slug}"
         return f"{parsed.scheme}://{parsed.netloc}/"
+    
+    # Handle Deloitte URLs - keep search parameters intact
+    if platform == 'deloitte' or 'deloitte.com' in parsed.netloc:
+        # Keep the full URL with search parameters
+        return url
     
     # For other platforms, keep only language parameter if present
     query_params = parsed.query

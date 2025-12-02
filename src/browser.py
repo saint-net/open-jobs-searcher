@@ -51,6 +51,7 @@ class BrowserLoader:
         r'\.smartrecruiters\.com',
         r'\.bamboohr\.com/jobs',
         r'\.ashbyhq\.com',
+        r'job\.deloitte\.com',
     ]
 
     def __init__(self, headless: bool = True, timeout: float = 30000):
@@ -146,7 +147,7 @@ class BrowserLoader:
             if page:
                 await page.close()
 
-    async def fetch_with_navigation(self, url: str, max_attempts: int = 2) -> Optional[str]:
+    async def fetch_with_navigation(self, url: str, max_attempts: int = 2) -> tuple[Optional[str], Optional[str]]:
         """
         Загрузить страницу и попытаться найти/перейти на страницу с вакансиями.
         
@@ -158,7 +159,7 @@ class BrowserLoader:
             max_attempts: Максимальное количество попыток навигации
             
         Returns:
-            HTML содержимое страницы с вакансиями или None
+            Tuple (HTML содержимое, финальный URL) или (None, None)
         """
         if self._browser is None:
             await self.start()
@@ -174,13 +175,14 @@ class BrowserLoader:
             response = await page.goto(url, timeout=self.timeout, wait_until="domcontentloaded")
             
             if response is None or response.status >= 400:
-                return None
+                return None, None
 
             # Ждём начальный рендеринг
             await page.wait_for_timeout(2000)
             
             # Получаем первоначальный HTML
             html = await page.content()
+            final_url = url  # Track the final URL after navigation
             
             # Пытаемся найти ссылку на вакансии и кликнуть
             for attempt in range(max_attempts):
@@ -189,28 +191,52 @@ class BrowserLoader:
                 if job_link:
                     logger.debug(f"Found job navigation link: {job_link}")
                     try:
-                        # Кликаем на ссылку
-                        await job_link.click()
-                        # Ждём навигацию или обновление контента
-                        await page.wait_for_timeout(2500)
+                        # Проверяем, открывается ли ссылка в новой вкладке (target="_blank")
+                        target = await job_link.get_attribute("target")
                         
-                        # Проверяем, перешли ли на внешний job board
-                        current_url = page.url
-                        if self._is_external_job_board(current_url):
-                            logger.info(f"Navigated to external job board: {current_url}")
-                            html = await page.content()
+                        if target == "_blank":
+                            # Обрабатываем клик с открытием новой вкладки
+                            async with page.context.expect_page() as new_page_info:
+                                await job_link.click()
+                            new_page = await new_page_info.value
+                            await new_page.wait_for_load_state("domcontentloaded")
+                            await new_page.wait_for_timeout(2500)
+                            
+                            current_url = new_page.url
+                            final_url = current_url
+                            if self._is_external_job_board(current_url):
+                                logger.info(f"Navigated to external job board (new tab): {current_url}")
+                                html = await new_page.content()
+                                await new_page.close()
+                                break
+                            
+                            html = await new_page.content()
+                            await new_page.close()
                             break
-                        
-                        # Получаем обновлённый HTML
-                        new_html = await page.content()
-                        
-                        # Проверяем, увеличился ли размер HTML (загрузился контент)
-                        if len(new_html) > len(html) * 1.2:  # Минимум 20% прирост
-                            logger.debug(f"Navigation succeeded, HTML size: {len(html)} -> {len(new_html)}")
-                            html = new_html
-                            break
-                        elif len(new_html) > len(html):
-                            html = new_html
+                        else:
+                            # Обычный клик
+                            await job_link.click()
+                            # Ждём навигацию или обновление контента
+                            await page.wait_for_timeout(2500)
+                            
+                            # Проверяем, перешли ли на внешний job board
+                            current_url = page.url
+                            final_url = current_url
+                            if self._is_external_job_board(current_url):
+                                logger.info(f"Navigated to external job board: {current_url}")
+                                html = await page.content()
+                                break
+                            
+                            # Получаем обновлённый HTML
+                            new_html = await page.content()
+                            
+                            # Проверяем, увеличился ли размер HTML (загрузился контент)
+                            if len(new_html) > len(html) * 1.2:  # Минимум 20% прирост
+                                logger.debug(f"Navigation succeeded, HTML size: {len(html)} -> {len(new_html)}")
+                                html = new_html
+                                break
+                            elif len(new_html) > len(html):
+                                html = new_html
                     except Exception as e:
                         logger.debug(f"Click failed: {e}")
                 else:
@@ -227,7 +253,7 @@ class BrowserLoader:
                 except Exception as e:
                     logger.debug(f"Failed to get iframe content: {e}")
             
-            return html
+            return html, final_url
 
         except Exception as e:
             error_str = str(e)
@@ -243,7 +269,7 @@ class BrowserLoader:
                 raise DomainUnreachableError(f"Домен недоступен: {url}") from e
             
             logger.warning(f"Browser error for {url}: {e}")
-            return None
+            return None, None
         finally:
             if page:
                 await page.close()

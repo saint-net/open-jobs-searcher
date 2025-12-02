@@ -3,7 +3,7 @@
 import logging
 import re
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 from src.models import Job
 from src.searchers.base import BaseSearcher
@@ -117,8 +117,16 @@ class WebsiteSearcher(BaseSearcher):
             
             for variant_url in self.url_discovery.generate_url_variants(careers_url):
                 # For browser mode, try navigation to jobs (for SPA)
+                final_url = variant_url
+                already_on_job_board = False
+                
                 if self.use_browser:
-                    careers_html = await self._fetch_with_browser(variant_url, navigate_to_jobs=True)
+                    careers_html, final_url = await self._fetch_with_browser(variant_url, navigate_to_jobs=True)
+                    final_url = final_url or variant_url
+                    # Check if we already navigated to an external job board
+                    already_on_job_board = detect_job_board_platform(final_url) is not None
+                    if already_on_job_board:
+                        variant_url = final_url
                 else:
                     careers_html = await self._fetch(variant_url)
                 
@@ -126,19 +134,25 @@ class WebsiteSearcher(BaseSearcher):
                     continue
                 
                 # 5.5. Check for external job board (Personio, Greenhouse, etc.)
-                external_board_url = find_external_job_board(careers_html)
+                # Skip if we already navigated to an external job board
                 external_platform = None
-                if external_board_url:
-                    logger.info(f"Found external job board: {external_board_url}")
-                    external_platform = detect_job_board_platform(external_board_url)
-                    # Load external job board via browser (many are SPA)
-                    if self.use_browser:
-                        external_html = await self._fetch_with_browser(external_board_url)
-                    else:
-                        external_html = await self.http_client.fetch(external_board_url)
-                    if external_html:
-                        careers_html = external_html
-                        variant_url = external_board_url
+                if not already_on_job_board:
+                    external_board_url = find_external_job_board(careers_html)
+                    if external_board_url:
+                        logger.info(f"Found external job board: {external_board_url}")
+                        external_platform = detect_job_board_platform(external_board_url)
+                        # Load external job board via browser (many are SPA)
+                        if self.use_browser:
+                            external_html, _ = await self._fetch_with_browser(external_board_url)
+                        else:
+                            external_html = await self.http_client.fetch(external_board_url)
+                        if external_html:
+                            careers_html = external_html
+                            variant_url = external_board_url
+                else:
+                    # Already on external job board, get platform for parser
+                    external_platform = detect_job_board_platform(final_url)
+                    logger.debug(f"Already on external job board: {final_url} (platform: {external_platform})")
                 
                 # 6. Extract jobs - try direct parser first, then LLM
                 jobs_data = []
@@ -150,6 +164,9 @@ class WebsiteSearcher(BaseSearcher):
                 # Fallback to LLM
                 if not jobs_data:
                     jobs_data = await self.llm.extract_jobs(careers_html, variant_url)
+                
+                # Filter jobs if we're on a search results page
+                jobs_data = self._filter_jobs_by_search_query(jobs_data, variant_url)
                 
                 if jobs_data:
                     careers_url = variant_url
@@ -195,26 +212,33 @@ class WebsiteSearcher(BaseSearcher):
     async def _fetch(self, url: str) -> Optional[str]:
         """Fetch HTML content from URL."""
         if self.use_browser:
-            return await self._fetch_with_browser(url)
+            html, _ = await self._fetch_with_browser(url)
+            return html
         return await self.http_client.fetch(url)
 
-    async def _fetch_with_browser(self, url: str, navigate_to_jobs: bool = False) -> Optional[str]:
+    async def _fetch_with_browser(
+        self, url: str, navigate_to_jobs: bool = False
+    ) -> tuple[Optional[str], Optional[str]]:
         """Fetch HTML via Playwright (slow, with JS).
         
         Args:
             url: Page URL
             navigate_to_jobs: Try to navigate to jobs page (for SPA)
+            
+        Returns:
+            Tuple (HTML, final_url) - final_url may differ from url if navigation occurred
         """
         try:
             loader = await self._get_browser_loader()
             if navigate_to_jobs:
                 return await loader.fetch_with_navigation(url)
-            return await loader.fetch(url)
+            html = await loader.fetch(url)
+            return html, url
         except DomainUnreachableError:
             raise
         except Exception as e:
             logger.warning(f"Browser fetch error for {url}: {e}")
-            return None
+            return None, None
 
     async def _try_alternative_urls(self, base_url: str) -> Optional[str]:
         """Try alternative URLs for careers page."""
@@ -239,6 +263,51 @@ class WebsiteSearcher(BaseSearcher):
         name = re.sub(r'\.(com|ru|org|net|io|co|tech)$', '', name)
         
         return name.title()
+
+    def _filter_jobs_by_search_query(self, jobs_data: list[dict], url: str) -> list[dict]:
+        """Filter jobs to only those matching the search query in URL.
+        
+        When navigating to a job board search page (e.g., job.deloitte.com/search?search=27pilots),
+        the page may show both search results AND recommended/featured jobs.
+        This method filters to keep only jobs that match the search query.
+        
+        Args:
+            jobs_data: List of job dictionaries
+            url: Current page URL
+            
+        Returns:
+            Filtered list of jobs matching the search query
+        """
+        if not jobs_data:
+            return jobs_data
+        
+        parsed = urlparse(url)
+        query_params = parse_qs(parsed.query)
+        
+        # Check for common search parameter names
+        search_term = None
+        for param_name in ['search', 'q', 'query', 'keyword', 'keywords']:
+            if param_name in query_params:
+                search_term = query_params[param_name][0].lower()
+                break
+        
+        if not search_term:
+            return jobs_data
+        
+        # Filter jobs that contain the search term in their title
+        filtered = []
+        for job in jobs_data:
+            title = job.get('title', '').lower()
+            if search_term in title:
+                filtered.append(job)
+        
+        if filtered:
+            logger.debug(f"Filtered jobs by search term '{search_term}': {len(jobs_data)} -> {len(filtered)}")
+            return filtered
+        
+        # If no jobs match, return all (search might be for company name/tag not in title)
+        logger.debug(f"No jobs matched search term '{search_term}', keeping all {len(jobs_data)}")
+        return jobs_data
 
     async def close(self):
         """Close HTTP client, browser and LLM provider."""
