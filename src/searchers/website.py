@@ -173,8 +173,11 @@ class WebsiteSearcher(BaseSearcher):
                 
                 # 5.5. Проверяем наличие внешнего job board (Personio, Greenhouse и т.д.)
                 external_board_url = self._find_external_job_board(careers_html)
+                external_platform = None
                 if external_board_url:
                     logger.info(f"Found external job board: {external_board_url}")
+                    # Определяем платформу
+                    external_platform = self._detect_job_board_platform(external_board_url)
                     # Загружаем внешний job board через браузер (многие SPA)
                     if self.use_browser:
                         external_html = await self._fetch_with_browser(external_board_url)
@@ -184,8 +187,18 @@ class WebsiteSearcher(BaseSearcher):
                         careers_html = external_html
                         variant_url = external_board_url
                 
-                # 6. Извлекаем вакансии с помощью LLM
-                jobs_data = await self.llm.extract_jobs(careers_html, variant_url)
+                # 6. Извлекаем вакансии - сначала пробуем прямой парсер, потом LLM
+                jobs_data = []
+                
+                # Для известных платформ используем прямой парсер (быстрее и надёжнее)
+                if external_platform:
+                    jobs_data = self._parse_job_board_html(careers_html, variant_url, external_platform)
+                    if jobs_data:
+                        logger.info(f"Parsed {len(jobs_data)} jobs from {external_platform} directly")
+                
+                # Fallback на LLM
+                if not jobs_data:
+                    jobs_data = await self.llm.extract_jobs(careers_html, variant_url)
                 
                 if jobs_data:
                     careers_url = variant_url  # Update to the working URL
@@ -598,6 +611,43 @@ class WebsiteSearcher(BaseSearcher):
         
         return None
 
+    # URLs to skip when looking for job boards (privacy, imprint, etc.)
+    SKIP_URL_PATTERNS = [
+        r'/privacy[-_]?policy',
+        r'/datenschutz',
+        r'/imprint',
+        r'/impressum',
+        r'/terms',
+        r'/agb',
+        r'/legal',
+        r'/cookie',
+        r'/contact',
+        r'/kontakt',
+    ]
+
+    def _is_job_board_url_valid(self, url: str) -> bool:
+        """Check if the job board URL is a valid jobs page (not privacy/legal)."""
+        for pattern in self.SKIP_URL_PATTERNS:
+            if re.search(pattern, url, re.IGNORECASE):
+                return False
+        return True
+
+    def _normalize_job_board_url(self, url: str) -> str:
+        """Normalize job board URL to the main jobs page.
+        
+        For example:
+        - https://company.jobs.personio.com/privacy-policy -> https://company.jobs.personio.com/
+        - https://company.jobs.personio.com/job/123 -> https://company.jobs.personio.com/
+        """
+        parsed = urlparse(url)
+        # For Personio and similar platforms, strip the path to get the main jobs page
+        # Keep only language parameter if present
+        query_params = parsed.query
+        lang_match = re.search(r'language=([a-z]{2})', query_params)
+        lang_param = f"?language={lang_match.group(1)}" if lang_match else ""
+        
+        return f"{parsed.scheme}://{parsed.netloc}/{lang_param}"
+
     def _find_external_job_board(self, html: str) -> Optional[str]:
         """Find external job board URL (Personio, Greenhouse, etc.) in HTML.
         
@@ -610,43 +660,208 @@ class WebsiteSearcher(BaseSearcher):
             External job board URL if found, None otherwise
         """
         soup = BeautifulSoup(html, 'lxml')
+        found_urls = []  # Collect all job board URLs
         
         # Check all links for external job board URLs
         for link in soup.find_all('a', href=True):
             href = link.get('href', '')
-            for pattern, _ in self.EXTERNAL_JOB_BOARDS:
+            for pattern, platform in self.EXTERNAL_JOB_BOARDS:
                 if re.search(pattern, href, re.IGNORECASE):
                     logger.debug(f"Found external job board link: {href}")
-                    return href
+                    found_urls.append((href, platform))
         
         # Check iframes for external job board sources
         for iframe in soup.find_all('iframe', src=True):
             src = iframe.get('src', '')
-            for pattern, _ in self.EXTERNAL_JOB_BOARDS:
+            for pattern, platform in self.EXTERNAL_JOB_BOARDS:
                 if re.search(pattern, src, re.IGNORECASE):
-                    logger.debug(f"Found external job board iframe: {src}")
-                    return src
+                    logger.info(f"Found external job board iframe")
+                    found_urls.append((src, platform))
         
         # Check data attributes that might contain job board URLs
         for elem in soup.find_all(attrs={'data-src': True}):
             data_src = elem.get('data-src', '')
-            for pattern, _ in self.EXTERNAL_JOB_BOARDS:
+            for pattern, platform in self.EXTERNAL_JOB_BOARDS:
                 if re.search(pattern, data_src, re.IGNORECASE):
                     logger.debug(f"Found external job board data-src: {data_src}")
-                    return data_src
+                    found_urls.append((data_src, platform))
         
         # Check for JavaScript variables/configs containing job board URLs
         for script in soup.find_all('script'):
             if script.string:
-                for pattern, _ in self.EXTERNAL_JOB_BOARDS:
+                for pattern, platform in self.EXTERNAL_JOB_BOARDS:
                     match = re.search(rf'["\']?(https?://[^\s"\'<>]*{pattern}[^\s"\'<>]*)["\']?', 
                                     script.string, re.IGNORECASE)
                     if match:
                         url = match.group(1)
                         logger.debug(f"Found external job board in script: {url}")
-                        return url
+                        found_urls.append((url, platform))
         
+        if not found_urls:
+            return None
+        
+        # First, try to find a valid job listing URL (not privacy/legal pages)
+        for url, platform in found_urls:
+            if self._is_job_board_url_valid(url):
+                logger.debug(f"Using valid job board URL: {url}")
+                return url
+        
+        # If all URLs are invalid (privacy/legal pages), normalize the first one
+        # to get the main jobs page
+        url, platform = found_urls[0]
+        normalized_url = self._normalize_job_board_url(url)
+        logger.info(f"Normalized job board URL: {url} -> {normalized_url}")
+        return normalized_url
+
+    def _detect_job_board_platform(self, url: str) -> Optional[str]:
+        """Определить платформу job board по URL."""
+        for pattern, platform in self.EXTERNAL_JOB_BOARDS:
+            if re.search(pattern, url, re.IGNORECASE):
+                return platform
         return None
+
+    def _parse_job_board_html(self, html: str, base_url: str, platform: str) -> list[dict]:
+        """Парсить HTML известных job board платформ напрямую без LLM."""
+        soup = BeautifulSoup(html, 'lxml')
+        
+        if platform == 'personio':
+            return self._parse_personio(soup, base_url)
+        elif platform == 'greenhouse':
+            return self._parse_greenhouse(soup, base_url)
+        elif platform == 'lever':
+            return self._parse_lever(soup, base_url)
+        
+        return []
+
+    def _parse_personio(self, soup: BeautifulSoup, base_url: str) -> list[dict]:
+        """Парсить вакансии с Personio."""
+        jobs = []
+        seen_urls = set()  # Для удаления дубликатов
+        
+        # Personio использует ссылки /job/ID
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            if '/job/' not in href:
+                continue
+            
+            # Строим полный URL
+            if href.startswith('/'):
+                parsed_base = urlparse(base_url)
+                job_url = f"{parsed_base.scheme}://{parsed_base.netloc}{href}"
+            else:
+                job_url = href
+            
+            # Пропускаем дубликаты
+            if job_url in seen_urls:
+                continue
+            seen_urls.add(job_url)
+            
+            # Извлекаем текст ссылки
+            text = link.get_text(separator=' ', strip=True)
+            if not text:
+                continue
+            
+            # Парсим структуру: "Title (all)Employment Type, Full-time·Location·Location"
+            # Разделяем по типичным паттернам
+            title = text
+            location = "Unknown"
+            employment_type = None
+            
+            # Ищем паттерны типа занятости
+            type_patterns = [
+                r'(Permanent employee|Intern / Student|Working student|Freelancer)',
+                r'(Full-time|Part-time|Teilzeit|Vollzeit)',
+            ]
+            
+            for pattern in type_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    # Разделяем title от типа занятости
+                    idx = text.find(match.group(1))
+                    if idx > 0:
+                        title = text[:idx].strip()
+                        remainder = text[idx:].strip()
+                        
+                        # Извлекаем локацию (после точки ·)
+                        loc_match = re.search(r'·\s*([^·]+)', remainder)
+                        if loc_match:
+                            location = loc_match.group(1).strip()
+                        break
+            
+            # Убираем (all), (m/w/d) из заголовка для чистоты
+            title = re.sub(r'\s*\(all\)\s*$', '', title, flags=re.IGNORECASE)
+            title = title.strip()
+            
+            if title:
+                jobs.append({
+                    "title": title,
+                    "location": location,
+                    "url": job_url,
+                    "department": None,
+                })
+        
+        return jobs
+
+    def _parse_greenhouse(self, soup: BeautifulSoup, base_url: str) -> list[dict]:
+        """Парсить вакансии с Greenhouse."""
+        jobs = []
+        
+        # Greenhouse обычно использует класс opening или job-post
+        for opening in soup.select('.opening, .job-post, [data-mapped="true"]'):
+            title_elem = opening.select_one('a, .opening-title, .job-title')
+            location_elem = opening.select_one('.location, .job-location')
+            
+            if not title_elem:
+                continue
+            
+            title = title_elem.get_text(strip=True)
+            href = title_elem.get('href', '')
+            
+            if href and not href.startswith('http'):
+                href = urljoin(base_url, href)
+            
+            location = location_elem.get_text(strip=True) if location_elem else "Unknown"
+            
+            if title:
+                jobs.append({
+                    "title": title,
+                    "location": location,
+                    "url": href or base_url,
+                    "department": None,
+                })
+        
+        return jobs
+
+    def _parse_lever(self, soup: BeautifulSoup, base_url: str) -> list[dict]:
+        """Парсить вакансии с Lever."""
+        jobs = []
+        
+        # Lever использует класс posting
+        for posting in soup.select('.posting, .posting-card'):
+            title_elem = posting.select_one('.posting-title, h5')
+            location_elem = posting.select_one('.location, .posting-categories')
+            link_elem = posting.select_one('a.posting-title, a')
+            
+            if not title_elem:
+                continue
+            
+            title = title_elem.get_text(strip=True)
+            href = link_elem.get('href', '') if link_elem else ''
+            
+            if href and not href.startswith('http'):
+                href = urljoin(base_url, href)
+            
+            location = location_elem.get_text(strip=True) if location_elem else "Unknown"
+            
+            if title:
+                jobs.append({
+                    "title": title,
+                    "location": location,
+                    "url": href or base_url,
+                    "department": None,
+                })
+        
+        return jobs
 
     def _extract_company_name(self, url: str) -> str:
         """Извлечь название компании из URL."""
