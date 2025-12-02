@@ -270,7 +270,7 @@ def website(
         help="URL сайта компании (например, https://company.com)",
     ),
     browser: bool = typer.Option(
-        False,
+        True,
         "--browser",
         "-b",
         help="Использовать браузер для загрузки (для SPA сайтов)",
@@ -300,7 +300,7 @@ def website(
         help="Формат вывода (json/csv)",
     ),
     verbose: bool = typer.Option(
-        False,
+        True,
         "--verbose",
         "-v",
         help="Показать отладочную информацию",
