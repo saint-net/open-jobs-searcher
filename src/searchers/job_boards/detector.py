@@ -151,7 +151,8 @@ def find_external_job_board(html: str) -> Optional[str]:
     
     # For platforms where individual job URLs should be normalized to main board
     # (e.g., Greenhouse /company/jobs/123 -> /company)
-    normalize_platforms = {'greenhouse'}
+    # (e.g., Personio /job/123 -> /)
+    normalize_platforms = {'greenhouse', 'personio'}
     
     # Collect unique normalized URLs per platform
     seen_normalized = set()
