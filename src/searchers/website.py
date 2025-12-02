@@ -49,6 +49,21 @@ class WebsiteSearcher(BaseSearcher):
         r'/карьера',
         r'/работа',
     ]
+    
+    # External job board platforms
+    EXTERNAL_JOB_BOARDS = [
+        # Platform: (URL pattern, iframe/embed detection pattern)
+        (r'\.jobs\.personio\.(?:de|com)', r'personio'),  # Personio
+        (r'boards\.greenhouse\.io', r'greenhouse'),  # Greenhouse
+        (r'jobs\.lever\.co', r'lever'),  # Lever
+        (r'\.workable\.com', r'workable'),  # Workable
+        (r'\.breezy\.hr', r'breezy'),  # Breezy HR
+        (r'\.recruitee\.com', r'recruitee'),  # Recruitee
+        (r'\.smartrecruiters\.com', r'smartrecruiters'),  # SmartRecruiters
+        (r'\.bamboohr\.com/jobs', r'bamboohr'),  # BambooHR
+        (r'\.ashbyhq\.com', r'ashby'),  # Ashby
+        (r'\.factorial\.co/job_posting', r'factorial'),  # Factorial
+    ]
 
     def __init__(
         self,
@@ -151,6 +166,16 @@ class WebsiteSearcher(BaseSearcher):
                 
                 if not careers_html:
                     continue
+                
+                # 5.5. Проверяем наличие внешнего job board (Personio, Greenhouse и т.д.)
+                external_board_url = self._find_external_job_board(careers_html)
+                if external_board_url:
+                    logger.info(f"Found external job board: {external_board_url}")
+                    # Загружаем внешний job board
+                    external_html = await self._fetch(external_board_url)
+                    if external_html:
+                        careers_html = external_html
+                        variant_url = external_board_url
                 
                 # 6. Извлекаем вакансии с помощью LLM
                 jobs_data = await self.llm.extract_jobs(careers_html, variant_url)
@@ -520,6 +545,56 @@ class WebsiteSearcher(BaseSearcher):
             for keyword in career_keywords:
                 if keyword in text:
                     return urljoin(base_url, href)
+        
+        return None
+
+    def _find_external_job_board(self, html: str) -> Optional[str]:
+        """Find external job board URL (Personio, Greenhouse, etc.) in HTML.
+        
+        Checks for:
+        - Links to external job board platforms
+        - Iframes loading external job boards
+        - Data attributes with external URLs
+        
+        Returns:
+            External job board URL if found, None otherwise
+        """
+        soup = BeautifulSoup(html, 'lxml')
+        
+        # Check all links for external job board URLs
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            for pattern, _ in self.EXTERNAL_JOB_BOARDS:
+                if re.search(pattern, href, re.IGNORECASE):
+                    logger.debug(f"Found external job board link: {href}")
+                    return href
+        
+        # Check iframes for external job board sources
+        for iframe in soup.find_all('iframe', src=True):
+            src = iframe.get('src', '')
+            for pattern, _ in self.EXTERNAL_JOB_BOARDS:
+                if re.search(pattern, src, re.IGNORECASE):
+                    logger.debug(f"Found external job board iframe: {src}")
+                    return src
+        
+        # Check data attributes that might contain job board URLs
+        for elem in soup.find_all(attrs={'data-src': True}):
+            data_src = elem.get('data-src', '')
+            for pattern, _ in self.EXTERNAL_JOB_BOARDS:
+                if re.search(pattern, data_src, re.IGNORECASE):
+                    logger.debug(f"Found external job board data-src: {data_src}")
+                    return data_src
+        
+        # Check for JavaScript variables/configs containing job board URLs
+        for script in soup.find_all('script'):
+            if script.string:
+                for pattern, _ in self.EXTERNAL_JOB_BOARDS:
+                    match = re.search(rf'["\']?(https?://[^\s"\'<>]*{pattern}[^\s"\'<>]*)["\']?', 
+                                    script.string, re.IGNORECASE)
+                    if match:
+                        url = match.group(1)
+                        logger.debug(f"Found external job board in script: {url}")
+                        return url
         
         return None
 

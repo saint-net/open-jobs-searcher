@@ -33,9 +33,24 @@ class BrowserLoader:
         r'alle\s*stellen',
         r'offene\s*stellen',
         r'stellenangebote',
+        r'stellenbörse',
+        r'zur\s*stellenbörse',
         # Russian
         r'все\s*вакансии',
         r'открытые\s*позиции',
+    ]
+    
+    # External job board platforms to detect
+    EXTERNAL_JOB_BOARD_PATTERNS = [
+        r'\.jobs\.personio\.',
+        r'boards\.greenhouse\.io',
+        r'jobs\.lever\.co',
+        r'\.workable\.com',
+        r'\.breezy\.hr',
+        r'\.recruitee\.com',
+        r'\.smartrecruiters\.com',
+        r'\.bamboohr\.com/jobs',
+        r'\.ashbyhq\.com',
     ]
 
     def __init__(self, headless: bool = True, timeout: float = 30000):
@@ -179,6 +194,13 @@ class BrowserLoader:
                         # Ждём навигацию или обновление контента
                         await page.wait_for_timeout(2500)
                         
+                        # Проверяем, перешли ли на внешний job board
+                        current_url = page.url
+                        if self._is_external_job_board(current_url):
+                            logger.info(f"Navigated to external job board: {current_url}")
+                            html = await page.content()
+                            break
+                        
                         # Получаем обновлённый HTML
                         new_html = await page.content()
                         
@@ -193,6 +215,17 @@ class BrowserLoader:
                         logger.debug(f"Click failed: {e}")
                 else:
                     break  # Нет ссылок для клика
+            
+            # Финальная проверка: если открылся iframe с внешним job board, получаем его контент
+            external_frame = await self._find_external_job_board_frame(page)
+            if external_frame:
+                logger.info(f"Found external job board iframe")
+                try:
+                    frame_html = await external_frame.content()
+                    if len(frame_html) > 1000:  # Минимальный размер для валидного контента
+                        html = frame_html
+                except Exception as e:
+                    logger.debug(f"Failed to get iframe content: {e}")
             
             return html
 
@@ -214,6 +247,25 @@ class BrowserLoader:
         finally:
             if page:
                 await page.close()
+
+    def _is_external_job_board(self, url: str) -> bool:
+        """Check if URL is an external job board platform."""
+        for pattern in self.EXTERNAL_JOB_BOARD_PATTERNS:
+            if re.search(pattern, url, re.IGNORECASE):
+                return True
+        return False
+
+    async def _find_external_job_board_frame(self, page: Page):
+        """Find iframe containing external job board content."""
+        try:
+            frames = page.frames
+            for frame in frames:
+                frame_url = frame.url
+                if self._is_external_job_board(frame_url):
+                    return frame
+        except Exception as e:
+            logger.debug(f"Error finding job board frame: {e}")
+        return None
 
     async def _find_job_navigation_link(self, page: Page):
         """
