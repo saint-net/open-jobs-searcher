@@ -5,6 +5,8 @@ from .hh import HeadHunterSearcher
 from .website import WebsiteSearcher
 from .stepstone import StepStoneSearcher
 from .karriere import KarriereATSearcher
+from .http_client import AsyncHttpClient
+from .url_discovery import CareerUrlDiscovery
 
 __all__ = [
     "BaseSearcher",
@@ -12,5 +14,7 @@ __all__ = [
     "WebsiteSearcher",
     "StepStoneSearcher",
     "KarriereATSearcher",
+    "AsyncHttpClient",
+    "CareerUrlDiscovery",
 ]
 

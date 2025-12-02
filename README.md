@@ -124,9 +124,20 @@ open-jobs-searcher/
 │   │   ├── ollama.py    # Ollama провайдер
 │   │   └── prompts.py   # Промпты для парсинга
 │   └── searchers/
-│       ├── base.py      # Базовый класс поисковика
-│       ├── hh.py        # HeadHunter API
-│       └── website.py   # Универсальный парсер сайтов
+│       ├── base.py           # Базовый класс поисковика
+│       ├── hh.py             # HeadHunter API
+│       ├── stepstone.py      # StepStone.de
+│       ├── karriere.py       # Karriere.at
+│       ├── website.py        # Универсальный парсер сайтов
+│       ├── http_client.py    # HTTP клиент с retry
+│       ├── url_discovery.py  # Поиск careers страниц
+│       └── job_boards/       # Парсеры job-платформ
+│           ├── base.py       # Базовый класс парсера
+│           ├── detector.py   # Детекция платформы
+│           ├── registry.py   # Реестр парсеров
+│           ├── personio.py   # Personio
+│           ├── greenhouse.py # Greenhouse
+│           └── lever.py      # Lever
 └── README.md
 ```
 
