@@ -135,6 +135,9 @@ class WebsiteSearcher(BaseSearcher):
         careers_url = None
 
         try:
+            # 0. Быстрая проверка доступности домена
+            await self._check_domain_available(url)
+            
             # 1. Пробуем найти через sitemap.xml (быстро и надёжно)
             careers_url = await self._find_careers_url_from_sitemap(url)
 
@@ -286,6 +289,49 @@ class WebsiteSearcher(BaseSearcher):
         except Exception as e:
             logger.warning(f"Browser fetch error for {url}: {e}")
             return None
+
+    async def _check_domain_available(self, url: str) -> None:
+        """Быстрая проверка доступности домена перед основными запросами.
+        
+        Делает HEAD запрос к базовому URL с коротким таймаутом.
+        Если домен недоступен - сразу бросает DomainUnreachableError.
+        
+        Args:
+            url: URL для проверки
+            
+        Raises:
+            DomainUnreachableError: если домен недоступен
+        """
+        try:
+            # Короткий таймаут для быстрой проверки
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # HEAD запрос быстрее чем GET
+                response = await client.head(url, follow_redirects=True)
+                # Любой ответ (даже 4xx/5xx) означает что домен доступен
+                logger.debug(f"Domain check: {url} -> {response.status_code}")
+        except httpx.ConnectError as e:
+            error_str = str(e).lower()
+            # Проверяем типичные ошибки недоступности
+            connection_errors = [
+                "name or service not known",
+                "nodename nor servname provided",
+                "getaddrinfo failed",
+                "no address associated",
+                "name resolution failed",
+                "temporary failure in name resolution",
+                "connection refused",
+                "[errno 111]",  # Linux connection refused
+                "[winerror 10061]",  # Windows connection refused
+            ]
+            if any(err in error_str for err in connection_errors):
+                raise DomainUnreachableError(f"Домен недоступен: {url}") from e
+            # Другие ошибки соединения тоже могут означать недоступность
+            raise DomainUnreachableError(f"Не удалось подключиться к домену: {url}") from e
+        except httpx.ConnectTimeout:
+            raise DomainUnreachableError(f"Таймаут подключения к домену: {url}")
+        except httpx.RequestError as e:
+            # Любая ошибка запроса на этом этапе = домен недоступен
+            raise DomainUnreachableError(f"Ошибка подключения к домену: {url} - {e}")
 
     async def _try_alternative_urls(self, base_url: str) -> Optional[str]:
         """Попробовать альтернативные URL для страницы вакансий."""
