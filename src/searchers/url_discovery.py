@@ -5,11 +5,24 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Optional
 from urllib.parse import urljoin, urlparse
+import tldextract
 
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
+
+# Career-related subdomains to check
+CAREER_SUBDOMAINS = [
+    'jobs',
+    'careers',
+    'karriere',
+    'career',
+    'stellen',
+    'join',
+    'work',
+    'hiring',
+]
 
 # URL patterns for career pages
 CAREER_PATTERNS = [
@@ -50,6 +63,49 @@ class CareerUrlDiscovery:
             http_client: HTTP client with fetch method
         """
         self.http_client = http_client
+
+    async def discover_career_subdomain(self, base_url: str) -> Optional[str]:
+        """Discover career-related subdomains (e.g., jobs.example.com).
+        
+        Many companies host their job portal on a separate subdomain like:
+        - jobs.example.com
+        - careers.example.com
+        - karriere.example.com
+        
+        Args:
+            base_url: Base URL of the website
+            
+        Returns:
+            Career subdomain URL if found and reachable
+        """
+        # Extract domain parts
+        extracted = tldextract.extract(base_url)
+        domain = extracted.domain
+        suffix = extracted.suffix
+        
+        if not domain or not suffix:
+            return None
+        
+        # Determine protocol from original URL
+        parsed = urlparse(base_url)
+        protocol = parsed.scheme or 'https'
+        
+        # Build base domain without subdomain (e.g., "3spin-learning.com")
+        base_domain = f"{domain}.{suffix}"
+        
+        # Try each career subdomain
+        for subdomain in CAREER_SUBDOMAINS:
+            subdomain_url = f"{protocol}://{subdomain}.{base_domain}"
+            try:
+                # check_domain_available returns None on success, raises on failure
+                await self.http_client.check_domain_available(subdomain_url)
+                logger.debug(f"Found career subdomain: {subdomain_url}")
+                return subdomain_url
+            except Exception as e:
+                logger.debug(f"Subdomain {subdomain_url} not available: {e}")
+                continue
+        
+        return None
 
     async def find_from_sitemap(self, base_url: str, llm_fallback=None) -> Optional[str]:
         """Find careers page URL from sitemap.xml.

@@ -92,26 +92,32 @@ class WebsiteSearcher(BaseSearcher):
             # 0. Quick domain availability check
             await self.http_client.check_domain_available(url)
             
-            # 1. Try to find via sitemap.xml (fast and reliable)
-            careers_url = await self.url_discovery.find_from_sitemap(url, llm_fallback=self.llm)
+            # 1. Check for career-related subdomains (e.g., jobs.example.com)
+            careers_url = await self.url_discovery.discover_career_subdomain(url)
+            if careers_url:
+                logger.info(f"Found career subdomain: {careers_url}")
+            
+            # 2. Try to find via sitemap.xml (fast and reliable)
+            if not careers_url:
+                careers_url = await self.url_discovery.find_from_sitemap(url, llm_fallback=self.llm)
 
-            # 2. Load main page and search heuristically
+            # 3. Load main page and search heuristically
             if not careers_url:
                 html = await self._fetch(url)
                 if html:
                     careers_url = self.url_discovery.find_from_html_heuristic(html, url)
                     
-                    # 3. If not found - use LLM
+                    # 4. If not found - use LLM
                     if not careers_url:
                         careers_url = await self.llm.find_careers_url(html, url)
 
-            # 4. Try alternative URLs directly
+            # 5. Try alternative URLs directly
             if not careers_url or careers_url == "NOT_FOUND":
                 careers_url = await self._try_alternative_urls(url)
                 if not careers_url:
                     return []
 
-            # 5. Load careers page (try URL variants: plural/singular)
+            # 6. Load careers page (try URL variants: plural/singular)
             jobs_data = []
             careers_html = None
             
@@ -137,7 +143,7 @@ class WebsiteSearcher(BaseSearcher):
                 if not careers_html:
                     continue
                 
-                # 5.5. Check for external job board (Personio, Greenhouse, etc.)
+                # 6.5. Check for external job board (Personio, Greenhouse, etc.)
                 # Skip if we already navigated to an external job board
                 external_platform = None
                 if not already_on_job_board:
@@ -158,7 +164,7 @@ class WebsiteSearcher(BaseSearcher):
                     external_platform = detect_job_board_platform(final_url)
                     logger.debug(f"Already on external job board: {final_url} (platform: {external_platform})")
                 
-                # 6. Extract jobs - try direct parser first, then LLM
+                # 7. Extract jobs - try direct parser first, then LLM
                 jobs_data = []
                 
                 # For known platforms use direct parser (faster and more reliable)
@@ -186,11 +192,11 @@ class WebsiteSearcher(BaseSearcher):
             if not careers_html:
                 return []
 
-            # 7. Translate job titles to English
+            # 8. Translate job titles to English
             titles = [job_data.get("title", "Unknown Position") for job_data in jobs_data]
             titles_en = await self.llm.translate_job_titles(titles)
 
-            # 8. Convert to Job models
+            # 9. Convert to Job models
             jobs = []
             company_name = self._extract_company_name(url)
             
