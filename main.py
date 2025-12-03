@@ -276,10 +276,10 @@ def website(
         help="Использовать браузер для загрузки (для SPA сайтов)",
     ),
     provider: str = typer.Option(
-        "ollama",
+        "openrouter",
         "--provider",
         "-p",
-        help="LLM провайдер (ollama, openrouter)",
+        help="LLM провайдер (openrouter, ollama)",
     ),
     model: Optional[str] = typer.Option(
         None,
@@ -314,7 +314,7 @@ def website(
     # Определяем модель для отображения
     display_model = model
     if display_model is None:
-        display_model = "openai/gpt-oss-20b" if provider == "openrouter" else "gpt-oss:20b"
+        display_model = "gpt-oss:20b" if provider == "ollama" else "openai/gpt-oss-20b"
     
     console.print(f"[bold blue]🌐 Сайт:[/bold blue] {url}")
     console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({display_model})")
@@ -337,10 +337,10 @@ async def _search_website(url: str, provider: str, model: Optional[str], use_bro
     """Асинхронный поиск вакансий на сайте."""
     # Определяем модель по умолчанию в зависимости от провайдера
     if model is None:
-        if provider == "openrouter":
-            model = "openai/gpt-oss-20b"
-        else:
+        if provider == "ollama":
             model = "gpt-oss:20b"
+        else:
+            model = "openai/gpt-oss-20b"
     
     try:
         llm = get_llm_provider(provider, model=model)
