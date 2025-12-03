@@ -28,6 +28,18 @@ pip install -r requirements.txt
 
 ### Для поиска по сайтам (LLM)
 
+По умолчанию используется **OpenRouter** с моделью `openai/gpt-oss-20b`.
+
+Создайте файл `.env` с API ключом:
+
+```bash
+OPENROUTER_API_KEY=your-api-key-here
+```
+
+Получить ключ можно на [openrouter.ai](https://openrouter.ai/)
+
+#### Альтернатива: Ollama (локально)
+
 Установите [Ollama](https://ollama.ai/) и скачайте модель:
 
 ```bash
@@ -61,11 +73,11 @@ python main.py search "DevOps" --experience "1-3"
 ### 🆕 Поиск на сайте компании (LLM)
 
 ```bash
-# Поиск вакансий на сайте компании
+# Поиск вакансий на сайте компании (OpenRouter по умолчанию)
 python main.py website https://example.com
 
-# С указанием модели
-python main.py website https://company.ru --model llama3.2
+# Использовать локальную Ollama
+python main.py website https://company.ru --provider ollama
 
 # Для SPA сайтов (React/Vue/Angular) используйте --browser
 python main.py website https://company.ru --browser
@@ -102,8 +114,8 @@ python main.py search "Python" --output results.csv --format csv
 | Опция | Описание |
 |-------|----------|
 | `--browser, -b` | Использовать браузер Playwright (для SPA сайтов) |
-| `--provider, -p` | LLM провайдер: `ollama`, `openai`, `claude` |
-| `--model, -m` | Модель LLM (по умолчанию `gpt-oss:20b`) |
+| `--provider, -p` | LLM провайдер: `openrouter` (по умолчанию), `ollama` |
+| `--model, -m` | Модель LLM (по умолчанию `openai/gpt-oss-20b`) |
 | `--output, -o` | Путь для сохранения результатов |
 | `--format, -f` | Формат: `json` или `csv` |
 
@@ -121,6 +133,7 @@ open-jobs-searcher/
 │   ├── browser.py       # Playwright загрузчик (SPA)
 │   ├── llm/             # LLM провайдеры
 │   │   ├── base.py      # Базовый класс LLM
+│   │   ├── openrouter.py # OpenRouter провайдер
 │   │   ├── ollama.py    # Ollama провайдер
 │   │   └── prompts.py   # Промпты для парсинга
 │   └── searchers/
@@ -145,6 +158,7 @@ open-jobs-searcher/
 
 | Провайдер | Статус | Модели |
 |-----------|--------|--------|
+| OpenRouter | ✅ По умолчанию | openai/gpt-oss-20b и [300+ других](https://openrouter.ai/models) |
 | Ollama | ✅ Готов | gpt-oss:20b, llama3.2, mistral и др. |
 | OpenAI | 🔜 Скоро | gpt-4o-mini, gpt-4o |
 | Claude | 🔜 Скоро | claude-3-haiku, claude-3-sonnet |
