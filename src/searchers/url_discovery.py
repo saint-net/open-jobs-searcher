@@ -78,7 +78,12 @@ class CareerUrlDiscovery:
                 if response is None:
                     continue
                     
-                xml_content = response.text
+                xml_content = response.text.strip()
+                
+                # Quick check if content looks like XML (not HTML)
+                if not xml_content or not xml_content.startswith('<?xml') and not xml_content.startswith('<urlset') and not xml_content.startswith('<sitemapindex'):
+                    logger.debug(f"Sitemap {sitemap_url} returned non-XML content (likely HTML 404 page)")
+                    continue
                 
                 # Parse XML
                 root = ET.fromstring(xml_content)
@@ -154,8 +159,15 @@ class CareerUrlDiscovery:
             response = await self.http_client.fetch_response(sitemap_url)
             if response is None:
                 return urls
+            
+            xml_content = response.text.strip()
+            
+            # Quick check if content looks like XML (not HTML)
+            if not xml_content or not xml_content.startswith('<?xml') and not xml_content.startswith('<urlset') and not xml_content.startswith('<sitemapindex'):
+                logger.debug(f"Nested sitemap {sitemap_url} returned non-XML content")
+                return urls
                 
-            root = ET.fromstring(response.text)
+            root = ET.fromstring(xml_content)
             
             # Detect namespace
             root_ns = root.tag.split('}')[0].strip('{') if '}' in root.tag else ''
