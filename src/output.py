@@ -6,12 +6,35 @@ from typing import Literal
 
 import pandas as pd
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from src.models import Job
 
 
 console = Console()
+
+
+def display_execution_time(elapsed_seconds: float) -> None:
+    """Отобразить время выполнения в красивом формате."""
+    if elapsed_seconds < 60:
+        time_str = f"{elapsed_seconds:.2f} сек"
+    elif elapsed_seconds < 3600:
+        minutes = int(elapsed_seconds // 60)
+        seconds = elapsed_seconds % 60
+        time_str = f"{minutes} мин {seconds:.1f} сек"
+    else:
+        hours = int(elapsed_seconds // 3600)
+        minutes = int((elapsed_seconds % 3600) // 60)
+        seconds = elapsed_seconds % 60
+        time_str = f"{hours} ч {minutes} мин {seconds:.0f} сек"
+    
+    console.print()
+    console.print(Panel(
+        f"[bold cyan]⏱️  Время выполнения:[/bold cyan] [bold white]{time_str}[/bold white]",
+        border_style="dim cyan",
+        padding=(0, 2),
+    ))
 
 
 def display_jobs(jobs: list[Job], detailed: bool = False) -> None:

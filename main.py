@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from typing import Optional
 
 import typer
@@ -11,7 +12,7 @@ from rich.logging import RichHandler
 from src.config import settings
 from src.searchers import HeadHunterSearcher, WebsiteSearcher, StepStoneSearcher, KarriereATSearcher
 from src.llm import get_llm_provider
-from src.output import display_jobs, save_jobs
+from src.output import display_jobs, save_jobs, display_execution_time
 
 # Configure logging
 logging.basicConfig(
@@ -72,6 +73,8 @@ def search(
     ),
 ):
     """Поиск вакансий по ключевым словам."""
+    start_time = time.perf_counter()
+    
     # Используем значения по умолчанию из настроек
     if not keywords:
         keywords = settings.default_keywords
@@ -91,6 +94,8 @@ def search(
     # Сохраняем если указан путь
     if output:
         save_jobs(jobs, output, format)
+    
+    display_execution_time(time.perf_counter() - start_time)
 
 
 async def _search_jobs(
@@ -152,6 +157,8 @@ def stepstone(
     ),
 ):
     """🇩🇪 Поиск вакансий на StepStone.de (Германия)."""
+    start_time = time.perf_counter()
+    
     console.print(f"[bold blue]🔍 Поиск:[/bold blue] {keywords}")
     if location:
         console.print(f"[bold blue]📍 Локация:[/bold blue] {location}")
@@ -163,6 +170,8 @@ def stepstone(
 
     if output:
         save_jobs(jobs, output, format)
+    
+    display_execution_time(time.perf_counter() - start_time)
 
 
 async def _search_stepstone(keywords: str, location: Optional[str], page: int) -> list:
@@ -215,6 +224,8 @@ def karriere(
     ),
 ):
     """🇦🇹 Поиск вакансий на Karriere.at (Австрия)."""
+    start_time = time.perf_counter()
+    
     console.print(f"[bold blue]🔍 Поиск:[/bold blue] {keywords}")
     if location:
         console.print(f"[bold blue]📍 Локация:[/bold blue] {location}")
@@ -226,6 +237,8 @@ def karriere(
 
     if output:
         save_jobs(jobs, output, format)
+    
+    display_execution_time(time.perf_counter() - start_time)
 
 
 async def _search_karriere(keywords: str, location: Optional[str], page: int) -> list:
@@ -307,6 +320,8 @@ def website(
     ),
 ):
     """Поиск вакансий на сайте компании с помощью LLM."""
+    start_time = time.perf_counter()
+    
     # Enable debug logging if verbose
     if verbose:
         logging.getLogger("src").setLevel(logging.DEBUG)
@@ -331,6 +346,8 @@ def website(
     # Сохраняем если указан путь
     if output:
         save_jobs(jobs, output, format)
+    
+    display_execution_time(time.perf_counter() - start_time)
 
 
 async def _search_website(url: str, provider: str, model: Optional[str], use_browser: bool) -> list:
