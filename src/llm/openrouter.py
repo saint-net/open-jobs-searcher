@@ -18,6 +18,10 @@ class OpenRouterProvider(BaseLLMProvider):
             "temperature": 0.0,
             "max_tokens": 4096,
         },
+        "openai/gpt-oss-120b": {
+            "temperature": 0.0,
+            "max_tokens": 4096,
+        },
     }
 
     # Дефолтная конфигурация для неизвестных моделей
