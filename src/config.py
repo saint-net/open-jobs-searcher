@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # OpenAI (для будущего использования)
     openai_api_key: str = Field(default="", description="OpenAI API ключ")
 
+    # OpenRouter
+    openrouter_api_key: str = Field(default="", description="OpenRouter API ключ")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

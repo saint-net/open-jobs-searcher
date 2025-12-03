@@ -2,6 +2,9 @@
 
 from .base import BaseLLMProvider
 from .ollama import OllamaProvider
+from .openrouter import OpenRouterProvider
+
+from src.config import settings
 
 
 def get_llm_provider(provider: str = "ollama", **kwargs) -> BaseLLMProvider:
@@ -9,7 +12,7 @@ def get_llm_provider(provider: str = "ollama", **kwargs) -> BaseLLMProvider:
     Фабрика для получения LLM провайдера.
 
     Args:
-        provider: Название провайдера (ollama, openai, claude)
+        provider: Название провайдера (ollama, openrouter, openai, claude)
         **kwargs: Дополнительные параметры для провайдера
 
     Returns:
@@ -18,6 +21,11 @@ def get_llm_provider(provider: str = "ollama", **kwargs) -> BaseLLMProvider:
     match provider.lower():
         case "ollama":
             return OllamaProvider(**kwargs)
+        case "openrouter":
+            # Используем API ключ из настроек, если не передан явно
+            if "api_key" not in kwargs:
+                kwargs["api_key"] = settings.openrouter_api_key
+            return OpenRouterProvider(**kwargs)
         case "openai":
             raise NotImplementedError("OpenAI provider coming soon")
         case "claude" | "anthropic":
@@ -26,7 +34,7 @@ def get_llm_provider(provider: str = "ollama", **kwargs) -> BaseLLMProvider:
             raise ValueError(f"Unknown LLM provider: {provider}")
 
 
-__all__ = ["BaseLLMProvider", "OllamaProvider", "get_llm_provider"]
+__all__ = ["BaseLLMProvider", "OllamaProvider", "OpenRouterProvider", "get_llm_provider"]
 
 
 

@@ -255,7 +255,7 @@ def info():
     console.print("  • HeadHunter (hh.ru) - Россия")
     console.print("  • StepStone.de - Германия 🇩🇪")
     console.print("  • Karriere.at - Австрия 🇦🇹")
-    console.print("  • Любой сайт компании (через LLM)")
+    console.print("  • Любой сайт компании (через LLM: Ollama, OpenRouter)")
     console.print("\nИспользование:")
     console.print("  jobs-searcher search 'Python Developer' --location Moscow")
     console.print("  jobs-searcher stepstone 'Python Developer' --location Berlin")
@@ -279,13 +279,13 @@ def website(
         "ollama",
         "--provider",
         "-p",
-        help="LLM провайдер (ollama, openai, claude)",
+        help="LLM провайдер (ollama, openrouter)",
     ),
-    model: str = typer.Option(
-        "gpt-oss:20b",
+    model: Optional[str] = typer.Option(
+        None,
         "--model",
         "-m",
-        help="Модель LLM",
+        help="Модель LLM (по умолчанию: gpt-oss:20b для ollama, openai/gpt-oss-20b для openrouter)",
     ),
     output: Optional[str] = typer.Option(
         None,
@@ -311,8 +311,13 @@ def website(
     if verbose:
         logging.getLogger("src").setLevel(logging.DEBUG)
     
+    # Определяем модель для отображения
+    display_model = model
+    if display_model is None:
+        display_model = "openai/gpt-oss-20b" if provider == "openrouter" else "gpt-oss:20b"
+    
     console.print(f"[bold blue]🌐 Сайт:[/bold blue] {url}")
-    console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({model})")
+    console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({display_model})")
     if browser:
         console.print(f"[bold blue]🌐 Режим:[/bold blue] браузер (Playwright)")
     console.print()
@@ -328,8 +333,15 @@ def website(
         save_jobs(jobs, output, format)
 
 
-async def _search_website(url: str, provider: str, model: str, use_browser: bool) -> list:
+async def _search_website(url: str, provider: str, model: Optional[str], use_browser: bool) -> list:
     """Асинхронный поиск вакансий на сайте."""
+    # Определяем модель по умолчанию в зависимости от провайдера
+    if model is None:
+        if provider == "openrouter":
+            model = "openai/gpt-oss-20b"
+        else:
+            model = "gpt-oss:20b"
+    
     try:
         llm = get_llm_provider(provider, model=model)
     except Exception as e:
