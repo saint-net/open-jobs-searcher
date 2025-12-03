@@ -131,6 +131,12 @@ class BaseLLMProvider(ABC):
             logger.debug(f"Found {len(json_jobs)} jobs from schema.org data")
             return json_jobs
         
+        # Try direct pattern-based extraction for German/international job pages
+        pattern_jobs = self._extract_jobs_by_pattern(html, url)
+        if pattern_jobs:
+            logger.debug(f"Found {len(pattern_jobs)} jobs via pattern extraction")
+            return pattern_jobs
+        
         # Try to extract only the main content (where jobs usually are)
         main_html = self._extract_main_content(html)
         
@@ -183,6 +189,130 @@ class BaseLLMProvider(ABC):
             }
             valid_jobs.append(valid_job)
         return valid_jobs
+
+    def _extract_jobs_by_pattern(self, html: str, url: str) -> list[dict]:
+        """
+        Extract jobs using pattern matching for common job title formats.
+        Works well for German/international job pages with (m/w/d) or (m/f/d) notation.
+        """
+        from bs4 import BeautifulSoup
+        from urllib.parse import urljoin
+        
+        soup = BeautifulSoup(html, 'lxml')
+        jobs = []
+        seen_titles = set()
+        
+        # Pattern for job titles with gender notation
+        # Matches: "Job Title (m/w/d)", "Position (m/f/d)", "Rolle (w/m/d)"
+        job_pattern = re.compile(r'\((?:m/w/d|w/m/d|m/f/d|f/m/d|m/w/x|all genders)\)', re.IGNORECASE)
+        
+        # Find all text containing gender notation
+        for elem in soup.find_all(string=lambda t: t and job_pattern.search(t)):
+            text = str(elem).strip()
+            
+            # Skip if text is too long (probably not a job title) or too short
+            if len(text) > 120 or len(text) < 5:
+                continue
+            
+            # Skip standalone notation like just "(m/w/d)"
+            if text in ('(m/w/d)', '(m/f/d)', '(w/m/d)', '(f/m/d)'):
+                continue
+            
+            # Skip duplicates
+            if text.lower() in seen_titles:
+                continue
+            seen_titles.add(text.lower())
+            
+            # Try to find link URL from parent elements
+            job_url = url
+            parent = elem.parent
+            for _ in range(6):
+                if parent and parent.name == 'a' and parent.get('href'):
+                    href = parent.get('href')
+                    if href and not href.startswith('#') and not href.startswith('javascript:'):
+                        job_url = urljoin(url, href)
+                        break
+                if parent:
+                    parent = parent.parent
+            
+            # Try to find location and company near the job title
+            location = self._find_job_location(elem)
+            company = self._find_job_company(elem)
+            
+            jobs.append({
+                "title": text,
+                "location": location,
+                "url": job_url,
+                "department": None,
+                "company": company,  # Company name from job card
+            })
+        
+        return jobs
+    
+    def _find_job_company(self, elem) -> str:
+        """Try to find company name near a job title element."""
+        # Look in parent/sibling elements for company name
+        parent = elem.parent
+        for _ in range(5):
+            if not parent:
+                break
+            
+            # Get all text from the job card
+            card_text = parent.get_text(separator=' ', strip=True)
+            
+            # Common company name patterns in German job listings
+            # e.g., "2R Software, S&F Software und ZEDAL, Teilzeit/Vollzeit..."
+            # Company names usually come before location/time info
+            company_pattern = re.compile(
+                r'^([A-Za-z0-9äöüÄÖÜß&\s\-\.]+(?:GmbH|AG|Software|IT|Tech|Solutions)?)'
+                r'(?:,|\s+und\s+|\s*[,;]\s*)',
+                re.IGNORECASE
+            )
+            
+            # Look for bold/strong text which often contains company name
+            for strong in parent.find_all(['strong', 'b']):
+                strong_text = strong.get_text(strip=True)
+                if strong_text and len(strong_text) < 100:
+                    # Check if it looks like a company name
+                    if any(kw in strong_text.lower() for kw in ['software', 'gmbh', 'ag', 'zedal', '2r']):
+                        return strong_text
+            
+            parent = parent.parent
+        
+        return ""
+
+    def _find_job_location(self, elem) -> str:
+        """Try to find location information near a job title element."""
+        # Common location patterns
+        location_keywords = ['remote', 'home office', 'vollzeit', 'teilzeit', 
+                           'deutschland', 'germany', 'austria', 'österreich',
+                           'schweiz', 'switzerland']
+        
+        # Check parent and siblings for location info
+        parent = elem.parent
+        for _ in range(4):
+            if not parent:
+                break
+            
+            text = parent.get_text(separator=' ', strip=True).lower()
+            
+            # Look for city/location patterns
+            for keyword in location_keywords:
+                if keyword in text:
+                    # Try to extract specific city
+                    city_pattern = re.compile(r'(?:in|standort|location|ort)[:\s]+([A-Za-zäöüÄÖÜß]+)', re.IGNORECASE)
+                    match = city_pattern.search(text)
+                    if match:
+                        return match.group(1).title()
+                    
+                    if 'remote' in text or 'home office' in text:
+                        return 'Remote'
+                    if 'deutschland' in text or 'germany' in text:
+                        return 'Germany'
+            
+            parent = parent.parent
+        
+        return "Unknown"
 
     def _extract_json_from_scripts(self, html: str) -> list[dict]:
         """Попытка извлечь JSON с вакансиями из script тегов (SSR/hydration)."""

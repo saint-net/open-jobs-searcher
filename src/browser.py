@@ -29,15 +29,22 @@ class BrowserLoader:
         r'open\s*positions',
         r'job\s*listings',
         r'browse\s*jobs',
+        r'career\s*portal',
+        r'job\s*portal',
         # German
         r'alle\s*stellen',
         r'offene\s*stellen',
         r'stellenangebote',
         r'stellenbörse',
         r'zur\s*stellenbörse',
+        r'zum?\s*karriereportal',
+        r'zu\s*den\s*jobs?',
+        r'karriereseite',
+        r'jobportal',
         # Russian
         r'все\s*вакансии',
         r'открытые\s*позиции',
+        r'карьерный\s*портал',
     ]
     
     # External job board platforms to detect
@@ -54,6 +61,25 @@ class BrowserLoader:
         r'job\.deloitte\.com',
     ]
 
+    # Cookie consent buttons (patterns for button text)
+    COOKIE_ACCEPT_PATTERNS = [
+        # English
+        r'accept\s*all',
+        r'allow\s*all',
+        r'agree\s*all',
+        r'i\s*accept',
+        r'accept\s*cookies',
+        # German
+        r'(ich\s+)?akzeptiere?\s*(alle)?',
+        r'alle\s*akzeptieren',
+        r'zustimmen',
+        r'einverstanden',
+        r'annehmen',
+        # Russian
+        r'принять\s*все',
+        r'согласен',
+    ]
+    
     def __init__(self, headless: bool = True, timeout: float = 30000):
         """
         Инициализация загрузчика.
@@ -71,6 +97,7 @@ class BrowserLoader:
         """Запустить браузер."""
         if self._browser is None:
             self._playwright = await async_playwright().start()
+            # Launch browser with clean context (no cookies from previous sessions)
             self._browser = await self._playwright.chromium.launch(
                 headless=self.headless,
             )
@@ -180,6 +207,14 @@ class BrowserLoader:
             # Ждём начальный рендеринг
             await page.wait_for_timeout(2000)
             
+            # Ждём и обрабатываем cookie consent диалоги (может появиться с задержкой)
+            for _ in range(3):
+                if await self._handle_cookie_consent(page):
+                    await page.wait_for_timeout(1000)
+                    break
+                # Ждём появления диалога
+                await page.wait_for_timeout(500)
+            
             # Получаем первоначальный HTML
             html = await page.content()
             final_url = url  # Track the final URL after navigation
@@ -204,11 +239,20 @@ class BrowserLoader:
                             
                             current_url = new_page.url
                             final_url = current_url
+                            
+                            # На новой странице тоже ищем навигацию к вакансиям
+                            # (например, "Zu den Jobs" на karriere.synqony.com)
+                            new_job_link = await self._find_job_navigation_link(new_page)
+                            if new_job_link:
+                                logger.debug(f"Found job nav link on external site, clicking...")
+                                try:
+                                    await new_job_link.click()
+                                    await new_page.wait_for_timeout(1500)
+                                except Exception:
+                                    pass
+                            
                             if self._is_external_job_board(current_url):
                                 logger.info(f"Navigated to external job board (new tab): {current_url}")
-                                html = await new_page.content()
-                                await new_page.close()
-                                break
                             
                             html = await new_page.content()
                             await new_page.close()
@@ -281,6 +325,73 @@ class BrowserLoader:
                 return True
         return False
 
+    async def _handle_cookie_consent(self, page: Page) -> bool:
+        """
+        Try to dismiss cookie consent dialogs.
+        
+        Returns:
+            True if a cookie dialog was handled, False otherwise
+        """
+        # Try dialog-specific selectors first, then general buttons
+        selectors = [
+            '[role="alertdialog"] button',
+            '[role="dialog"] button',
+            '[class*="consent"] button',
+            '[class*="cookie"] button',
+            '[id*="consent"] button',
+            '[id*="cookie"] button',
+            '[class*="modal"] button',
+            '[class*="banner"] button',
+            'button',
+        ]
+        
+        # Debug: check what buttons exist
+        try:
+            all_buttons = await page.query_selector_all('button')
+            button_texts = []
+            for btn in all_buttons[:10]:  # First 10 buttons
+                try:
+                    txt = await btn.inner_text()
+                    if txt and txt.strip():
+                        button_texts.append(txt.strip()[:30])
+                except Exception:
+                    pass
+            if button_texts:
+                logger.debug(f"Found buttons on page: {button_texts}")
+        except Exception as e:
+            logger.debug(f"Error listing buttons: {e}")
+        
+        for selector in selectors:
+            try:
+                elements = await page.query_selector_all(selector)
+                
+                for element in elements:
+                    try:
+                        text = await element.inner_text()
+                        if not text:
+                            continue
+                        
+                        text_lower = text.lower().strip()
+                        
+                        for pattern in self.COOKIE_ACCEPT_PATTERNS:
+                            if re.search(pattern, text_lower, re.IGNORECASE):
+                                if await element.is_visible():
+                                    logger.debug(f"Clicking cookie consent: '{text.strip()[:40]}'")
+                                    try:
+                                        await element.click()
+                                        await page.wait_for_timeout(1000)
+                                        return True
+                                    except Exception as e:
+                                        logger.debug(f"Failed to click cookie button: {e}")
+                                        continue
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        
+        logger.debug("No cookie consent dialog found")
+        return False
+
     async def _find_external_job_board_frame(self, page: Page):
         """Find iframe containing external job board content."""
         try:
@@ -306,7 +417,34 @@ class BrowserLoader:
         Returns:
             Элемент для клика или None
         """
-        # Ищем все потенциальные ссылки и кнопки
+        # First, try to find links by href containing karriere/jobs/career patterns
+        href_patterns = [
+            r'karriere\.',  # External karriere subdomain
+            r'/jobs/?$',
+            r'/careers/?$',
+            r'/stellenangebote/?$',
+        ]
+        
+        try:
+            links = await page.query_selector_all('a[href]')
+            for link in links:
+                try:
+                    href = await link.get_attribute('href')
+                    if not href:
+                        continue
+                    
+                    for pattern in href_patterns:
+                        if re.search(pattern, href, re.IGNORECASE):
+                            if await link.is_visible():
+                                text = await link.inner_text()
+                                logger.debug(f"Found job link by href: '{href}' (text: '{text.strip()[:30]}')")
+                                return link
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        
+        # Then search by text content
         selectors = [
             'a',
             'button',
@@ -334,12 +472,14 @@ class BrowserLoader:
                             if re.search(pattern, text_lower, re.IGNORECASE):
                                 # Проверяем, что элемент видим и кликабелен
                                 if await element.is_visible():
+                                    logger.debug(f"Found job nav link: '{text.strip()[:50]}' matching pattern '{pattern}'")
                                     return element
                     except Exception:
                         continue
             except Exception:
                 continue
         
+        logger.debug("No job navigation link found on page")
         return None
 
     async def __aenter__(self):
