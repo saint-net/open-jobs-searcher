@@ -49,5 +49,3 @@ class BaseSearcher(ABC):
             Детальная информация о вакансии или None
         """
         pass
-
-

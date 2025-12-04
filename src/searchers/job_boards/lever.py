@@ -38,6 +38,3 @@ class LeverParser(BaseJobBoardParser):
                 })
         
         return jobs
-
-
-

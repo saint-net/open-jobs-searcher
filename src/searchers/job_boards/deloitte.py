@@ -117,6 +117,3 @@ class DeloitteParser(BaseJobBoardParser):
             parent = parent.parent
         
         return "Germany"
-
-
-

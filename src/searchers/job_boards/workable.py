@@ -270,6 +270,3 @@ class WorkableParser(BaseJobBoardParser):
                     title = title.replace(wt, '').strip()
         
         return title, location, department
-
-
-
