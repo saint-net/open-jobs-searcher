@@ -39,3 +39,4 @@ class BaseJobBoardParser(ABC):
 
 
 
+
