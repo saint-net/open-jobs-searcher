@@ -118,8 +118,3 @@ class DeloitteParser(BaseJobBoardParser):
         
         return "Germany"
 
-
-
-
-
-

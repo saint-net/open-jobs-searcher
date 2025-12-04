@@ -35,9 +35,3 @@ class BaseJobBoardParser(ABC):
             parsed = urlparse(base_url)
             return f"{parsed.scheme}://{parsed.netloc}{href}"
         return urljoin(base_url, href)
-
-
-
-
-
-
