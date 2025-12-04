@@ -37,3 +37,5 @@ class BaseJobBoardParser(ABC):
         return urljoin(base_url, href)
 
 
+
+
