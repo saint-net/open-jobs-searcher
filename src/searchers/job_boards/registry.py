@@ -10,6 +10,7 @@ from src.searchers.job_boards.personio import PersonioParser
 from src.searchers.job_boards.greenhouse import GreenhouseParser
 from src.searchers.job_boards.lever import LeverParser
 from src.searchers.job_boards.deloitte import DeloitteParser
+from src.searchers.job_boards.workable import WorkableParser
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class JobBoardParserRegistry:
         self.register(GreenhouseParser())
         self.register(LeverParser())
         self.register(DeloitteParser())
+        self.register(WorkableParser())
 
     def register(self, parser: BaseJobBoardParser):
         """Register a parser for a platform."""

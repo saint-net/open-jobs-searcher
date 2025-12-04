@@ -72,6 +72,7 @@ def _normalize_job_board_url(url: str, platform: str = None) -> str:
     - https://company.jobs.personio.com/job/123 -> https://company.jobs.personio.com/
     - https://job-boards.greenhouse.io/company/jobs/123 -> https://job-boards.greenhouse.io/company
     - https://boards.greenhouse.io/company/jobs/123 -> https://boards.greenhouse.io/company
+    - https://apply.workable.com/company/gdpr_policy -> https://apply.workable.com/company/
     - https://job.deloitte.com/search?search=27pilots -> https://job.deloitte.com/search?search=27pilots (keep as-is)
     """
     parsed = urlparse(url)
@@ -83,6 +84,16 @@ def _normalize_job_board_url(url: str, platform: str = None) -> str:
         if path_parts and path_parts[0]:
             company_slug = path_parts[0]
             return f"{parsed.scheme}://{parsed.netloc}/{company_slug}"
+        return f"{parsed.scheme}://{parsed.netloc}/"
+    
+    # Handle Workable URLs - keep company slug, strip everything else
+    if platform == 'workable' or 'workable.com' in parsed.netloc:
+        # Path like /company/gdpr_policy -> /company/
+        # Path like /company/j/ABC123 -> /company/
+        path_parts = parsed.path.strip('/').split('/')
+        if path_parts and path_parts[0]:
+            company_slug = path_parts[0]
+            return f"{parsed.scheme}://{parsed.netloc}/{company_slug}/"
         return f"{parsed.scheme}://{parsed.netloc}/"
     
     # Handle Deloitte URLs - keep search parameters intact
@@ -159,7 +170,8 @@ def find_external_job_board(html: str) -> Optional[str]:
     # For platforms where individual job URLs should be normalized to main board
     # (e.g., Greenhouse /company/jobs/123 -> /company)
     # (e.g., Personio /job/123 -> /)
-    normalize_platforms = {'greenhouse', 'personio'}
+    # (e.g., Workable /company/gdpr_policy -> /company)
+    normalize_platforms = {'greenhouse', 'personio', 'workable'}
     
     # Collect unique normalized URLs per platform
     seen_normalized = set()

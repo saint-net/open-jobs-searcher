@@ -87,35 +87,44 @@ class WebsiteSearcher(BaseSearcher):
             url = f'https://{url}'
 
         careers_url = None
+        career_subdomain = None
 
         try:
             # 0. Quick domain availability check
             await self.http_client.check_domain_available(url)
             
             # 1. Check for career-related subdomains (e.g., jobs.example.com)
-            careers_url = await self.url_discovery.discover_career_subdomain(url)
-            if careers_url:
-                logger.info(f"Found career subdomain: {careers_url}")
+            # Save for later - we'll also check main domain
+            career_subdomain = await self.url_discovery.discover_career_subdomain(url)
+            if career_subdomain:
+                logger.info(f"Found career subdomain: {career_subdomain}")
             
-            # 2. Try to find via sitemap.xml (fast and reliable)
-            if not careers_url:
-                careers_url = await self.url_discovery.find_from_sitemap(url, llm_fallback=self.llm)
+            # 2. Try to find careers page on MAIN domain first
+            # (often has more complete job listings than subdomain)
+            
+            # 2a. Try sitemap.xml
+            careers_url = await self.url_discovery.find_from_sitemap(url, llm_fallback=self.llm)
 
-            # 3. Load main page and search heuristically
+            # 2b. Load main page and search heuristically
             if not careers_url:
                 html = await self._fetch(url)
                 if html:
                     careers_url = self.url_discovery.find_from_html_heuristic(html, url)
                     
-                    # 4. If not found - use LLM
+                    # 2c. If not found - use LLM
                     if not careers_url:
                         careers_url = await self.llm.find_careers_url(html, url)
 
-            # 5. Try alternative URLs directly
+            # 2d. Try alternative URLs directly
             if not careers_url or careers_url == "NOT_FOUND":
                 careers_url = await self._try_alternative_urls(url)
-                if not careers_url:
-                    return []
+            
+            # 3. If no careers page on main domain, use subdomain
+            if (not careers_url or careers_url == "NOT_FOUND") and career_subdomain:
+                careers_url = career_subdomain
+            
+            if not careers_url or careers_url == "NOT_FOUND":
+                return []
 
             # 6. Load careers page (try URL variants: plural/singular)
             jobs_data = []
@@ -192,6 +201,31 @@ class WebsiteSearcher(BaseSearcher):
             if not careers_html:
                 return []
 
+            # 7.5. If we have a subdomain AND we got jobs from main page,
+            # also check subdomain for additional jobs (subdomain often has more detail)
+            if career_subdomain and careers_url != career_subdomain:
+                subdomain_jobs = await self._extract_jobs_from_url(career_subdomain, url)
+                if subdomain_jobs:
+                    # Merge jobs from both sources
+                    # Start with subdomain jobs (usually more detailed with individual URLs)
+                    merged_jobs = list(subdomain_jobs)
+                    subdomain_titles = {j.get('title', '').lower().strip() for j in subdomain_jobs}
+                    
+                    # Add jobs from main page that aren't in subdomain
+                    added_from_main = 0
+                    for job in jobs_data:
+                        job_title = job.get('title', '').lower().strip()
+                        if job_title and job_title not in subdomain_titles:
+                            merged_jobs.append(job)
+                            subdomain_titles.add(job_title)
+                            added_from_main += 1
+                    
+                    if added_from_main:
+                        logger.info(f"Added {added_from_main} unique jobs from main careers page")
+                    
+                    jobs_data = merged_jobs
+                    logger.info(f"Total jobs after merge: {len(jobs_data)}")
+
             # 8. Translate job titles to English
             titles = [job_data.get("title", "Unknown Position") for job_data in jobs_data]
             titles_en = await self.llm.translate_job_titles(titles)
@@ -266,6 +300,59 @@ class WebsiteSearcher(BaseSearcher):
                 logger.info("Domain unreachable, stopping URL iteration")
                 raise
         return None
+
+    async def _extract_jobs_from_url(self, careers_url: str, original_url: str) -> list[dict]:
+        """Extract jobs from a single careers URL.
+        
+        Args:
+            careers_url: URL of careers/jobs page
+            original_url: Original company URL (for filtering)
+            
+        Returns:
+            List of job dictionaries
+        """
+        jobs_data = []
+        
+        try:
+            # Load page
+            if self.use_browser:
+                html, final_url = await self._fetch_with_browser(careers_url, navigate_to_jobs=True)
+                final_url = final_url or careers_url
+            else:
+                html = await self.http_client.fetch(careers_url)
+                final_url = careers_url
+            
+            if not html:
+                return []
+            
+            # Check for external job board
+            external_platform = detect_job_board_platform(final_url)
+            if not external_platform:
+                external_board_url = find_external_job_board(html)
+                if external_board_url:
+                    external_platform = detect_job_board_platform(external_board_url)
+                    # Load external board
+                    if self.use_browser:
+                        html, _ = await self._fetch_with_browser(external_board_url)
+                    else:
+                        html = await self.http_client.fetch(external_board_url)
+                    if not html:
+                        return []
+                    final_url = external_board_url
+            
+            # Extract jobs using parser or LLM
+            if external_platform:
+                jobs_data = self.job_board_parsers.parse(html, final_url, external_platform)
+            
+            if not jobs_data:
+                jobs_data = await self.llm.extract_jobs(html, final_url)
+            
+            logger.debug(f"Extracted {len(jobs_data)} jobs from {final_url}")
+            return jobs_data
+            
+        except Exception as e:
+            logger.warning(f"Error extracting jobs from {careers_url}: {e}")
+            return []
 
     def _extract_company_name(self, url: str) -> str:
         """Extract company name from URL."""
