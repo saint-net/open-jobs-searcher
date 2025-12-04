@@ -5,6 +5,7 @@ import re
 from typing import Optional
 from urllib.parse import urlparse
 
+import httpx
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
@@ -41,18 +42,27 @@ SKIP_URL_PATTERNS = [
 ]
 
 
-def detect_job_board_platform(url: str) -> Optional[str]:
-    """Detect job board platform from URL.
+def detect_job_board_platform(url: str, html: Optional[str] = None) -> Optional[str]:
+    """Detect job board platform from URL and optionally HTML.
     
     Args:
         url: URL to check
+        html: Optional HTML content to analyze for platform signatures
         
     Returns:
         Platform name or None if not detected
     """
+    # First check URL patterns
     for pattern, platform in EXTERNAL_JOB_BOARDS:
         if re.search(pattern, url, re.IGNORECASE):
             return platform
+    
+    # If HTML is provided, check for platform signatures
+    if html:
+        # Check for Recruitee (uses custom domains)
+        if detect_recruitee_from_html(html):
+            return 'recruitee'
+    
     return None
 
 
@@ -107,6 +117,53 @@ def _normalize_job_board_url(url: str, platform: str = None) -> str:
     lang_param = f"?language={lang_match.group(1)}" if lang_match else ""
     
     return f"{parsed.scheme}://{parsed.netloc}/{lang_param}"
+
+
+def detect_recruitee_from_html(html: str) -> bool:
+    """Detect if a page is powered by Recruitee.
+    
+    Recruitee sites can use custom domains but have telltale signs:
+    - "Hiring with Recruitee" or "recruitee" links in footer
+    - recruiteecdn.com images
+    - careers-analytics.recruitee.com tracking
+    - Specific data attributes or script patterns
+    
+    Args:
+        html: HTML content of the page
+        
+    Returns:
+        True if page is powered by Recruitee
+    """
+    soup = BeautifulSoup(html, 'lxml')
+    
+    # Check for Recruitee footer link
+    for link in soup.find_all('a', href=True):
+        href = link.get('href', '').lower()
+        text = link.get_text(strip=True).lower()
+        if 'recruitee' in href or 'recruitee' in text:
+            logger.debug(f"Detected Recruitee from link: {href or text}")
+            return True
+    
+    # Check for Recruitee CDN images
+    for img in soup.find_all('img', src=True):
+        if 'recruiteecdn.com' in img.get('src', ''):
+            logger.debug("Detected Recruitee from CDN image")
+            return True
+    
+    # Check for Recruitee scripts or tracking
+    for script in soup.find_all('script'):
+        src = script.get('src', '')
+        text = script.string or ''
+        if 'recruitee' in src.lower() or 'recruitee' in text.lower():
+            logger.debug("Detected Recruitee from script")
+            return True
+    
+    # Check raw HTML for recruitee patterns
+    if 'recruitee' in html.lower() or 'recruiteecdn.com' in html.lower():
+        logger.debug("Detected Recruitee from raw HTML")
+        return True
+    
+    return False
 
 
 def find_external_job_board(html: str) -> Optional[str]:

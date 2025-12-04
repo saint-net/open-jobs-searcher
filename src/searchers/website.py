@@ -168,9 +168,15 @@ class WebsiteSearcher(BaseSearcher):
                         if external_html:
                             careers_html = external_html
                             variant_url = external_board_url
+                    else:
+                        # No external board URL found, but page might be an embedded job board
+                        # (e.g., Recruitee with custom domain)
+                        external_platform = detect_job_board_platform(variant_url, careers_html)
+                        if external_platform:
+                            logger.debug(f"Detected embedded job board platform: {external_platform}")
                 else:
                     # Already on external job board, get platform for parser
-                    external_platform = detect_job_board_platform(final_url)
+                    external_platform = detect_job_board_platform(final_url, careers_html)
                     logger.debug(f"Already on external job board: {final_url} (platform: {external_platform})")
                 
                 # 7. Extract jobs - try direct parser first, then LLM
@@ -178,7 +184,11 @@ class WebsiteSearcher(BaseSearcher):
                 
                 # For known platforms use direct parser (faster and more reliable)
                 if external_platform:
-                    jobs_data = self.job_board_parsers.parse(careers_html, variant_url, external_platform)
+                    # Check if platform requires API call (e.g., Recruitee)
+                    if self.job_board_parsers.is_api_based(external_platform):
+                        jobs_data = await self._fetch_jobs_from_api(variant_url, external_platform)
+                    else:
+                        jobs_data = self.job_board_parsers.parse(careers_html, variant_url, external_platform)
                 
                 # Fallback to LLM
                 if not jobs_data:
@@ -301,6 +311,40 @@ class WebsiteSearcher(BaseSearcher):
                 raise
         return None
 
+    async def _fetch_jobs_from_api(self, base_url: str, platform: str) -> list[dict]:
+        """Fetch jobs from API for platforms that require it.
+        
+        Some platforms (like Recruitee) render job listings via JavaScript
+        and provide a JSON API endpoint instead of static HTML.
+        
+        Args:
+            base_url: Base URL of the career site
+            platform: Platform name (e.g., 'recruitee')
+            
+        Returns:
+            List of job dictionaries
+        """
+        api_url = self.job_board_parsers.get_api_url(base_url, platform)
+        if not api_url:
+            logger.debug(f"No API URL for platform: {platform}")
+            return []
+        
+        try:
+            logger.debug(f"Fetching jobs from API: {api_url}")
+            json_text = await self.http_client.fetch(api_url)
+            if not json_text:
+                return []
+            
+            import json
+            json_data = json.loads(json_text)
+            jobs = self.job_board_parsers.parse_api_json(json_data, base_url, platform)
+            logger.debug(f"Fetched {len(jobs)} jobs from {platform} API")
+            return jobs
+            
+        except Exception as e:
+            logger.warning(f"Error fetching jobs from API {api_url}: {e}")
+            return []
+
     async def _extract_jobs_from_url(self, careers_url: str, original_url: str) -> list[dict]:
         """Extract jobs from a single careers URL.
         
@@ -326,7 +370,7 @@ class WebsiteSearcher(BaseSearcher):
                 return []
             
             # Check for external job board
-            external_platform = detect_job_board_platform(final_url)
+            external_platform = detect_job_board_platform(final_url, html)
             if not external_platform:
                 external_board_url = find_external_job_board(html)
                 if external_board_url:
@@ -342,7 +386,11 @@ class WebsiteSearcher(BaseSearcher):
             
             # Extract jobs using parser or LLM
             if external_platform:
-                jobs_data = self.job_board_parsers.parse(html, final_url, external_platform)
+                # Check if platform requires API call (e.g., Recruitee)
+                if self.job_board_parsers.is_api_based(external_platform):
+                    jobs_data = await self._fetch_jobs_from_api(final_url, external_platform)
+                else:
+                    jobs_data = self.job_board_parsers.parse(html, final_url, external_platform)
             
             if not jobs_data:
                 jobs_data = await self.llm.extract_jobs(html, final_url)
