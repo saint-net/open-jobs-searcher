@@ -171,6 +171,18 @@ class BaseLLMProvider(ABC):
         logger.warning(f"Failed to extract jobs from {url} after {self.MAX_EXTRACTION_RETRIES} attempts")
         return []
     
+    # Non-job titles to filter out (open applications, general inquiries, etc.)
+    NON_JOB_PATTERNS = [
+        r'initiativbewerbung',  # German: Open/unsolicited application
+        r'initiativ\s*bewerbung',
+        r'spontanbewerbung',  # German: Spontaneous application
+        r'open\s*application',  # English variants
+        r'unsolicited\s*application',
+        r'speculative\s*application',
+        r'general\s*application',
+        r'blindbewerbung',  # German: Blind application
+    ]
+    
     def _validate_jobs(self, jobs: list) -> list[dict]:
         """Validate and filter job entries."""
         valid_jobs = []
@@ -180,15 +192,31 @@ class BaseLLMProvider(ABC):
             # Must have at least a title
             if not job.get("title"):
                 continue
+            
+            title = str(job.get("title", "")).strip()
+            
+            # Filter out non-job entries (open applications, etc.)
+            if self._is_non_job_entry(title):
+                logger.debug(f"Filtered non-job entry: {title}")
+                continue
+            
             # Clean up and normalize
             valid_job = {
-                "title": str(job.get("title", "")).strip(),
+                "title": title,
                 "location": str(job.get("location", "Unknown")).strip() or "Unknown",
                 "url": str(job.get("url", "")).strip(),
                 "department": job.get("department"),
             }
             valid_jobs.append(valid_job)
         return valid_jobs
+    
+    def _is_non_job_entry(self, title: str) -> bool:
+        """Check if title is a non-job entry (open application, etc.)."""
+        title_lower = title.lower()
+        for pattern in self.NON_JOB_PATTERNS:
+            if re.search(pattern, title_lower, re.IGNORECASE):
+                return True
+        return False
 
     def _extract_jobs_by_pattern(self, html: str, url: str) -> list[dict]:
         """

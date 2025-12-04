@@ -40,6 +40,7 @@ EXTERNAL_JOB_BOARD_PATTERNS = [
     r'\.bamboohr\.com/jobs',
     r'\.ashbyhq\.com',
     r'job\.deloitte\.com',
+    r'hrworks\.de',  # HRworks job boards
 ]
 
 # Cookie consent buttons (patterns for button text)

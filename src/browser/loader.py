@@ -40,8 +40,13 @@ class BrowserLoader:
         if self._browser is None:
             self._playwright = await async_playwright().start()
             # Launch browser with clean context (no cookies from previous sessions)
+            # Add Chromium args to allow third-party cookies (needed for HRworks and similar job boards)
             self._browser = await self._playwright.chromium.launch(
                 headless=self.headless,
+                args=[
+                    "--disable-features=SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure",
+                    "--disable-site-isolation-trials",
+                ],
             )
 
     async def stop(self):
