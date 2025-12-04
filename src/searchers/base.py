@@ -50,3 +50,4 @@ class BaseSearcher(ABC):
         """
         pass
 
+

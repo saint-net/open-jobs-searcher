@@ -272,3 +272,4 @@ class WorkableParser(BaseJobBoardParser):
         return title, location, department
 
 
+
