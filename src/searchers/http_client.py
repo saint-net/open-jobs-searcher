@@ -1,6 +1,7 @@
 """Async HTTP client with retry and domain availability checks."""
 
 import logging
+import ssl
 from typing import Optional
 
 import httpx
@@ -26,6 +27,17 @@ class AsyncHttpClient:
         "[errno 111]",  # Linux connection refused
         "[winerror 10061]",  # Windows connection refused
     ]
+    
+    # SSL/TLS error patterns (retry without verification)
+    SSL_ERROR_PATTERNS = [
+        "certificate verify failed",
+        "ssl: certificate_verify_failed",
+        "certificate_verify_failed",
+        "unable to get local issuer certificate",
+        "self signed certificate",
+        "ssl handshake",
+        "[ssl:",
+    ]
 
     def __init__(
         self,
@@ -46,12 +58,35 @@ class AsyncHttpClient:
         }
         if headers:
             default_headers.update(headers)
-            
+        
+        self._headers = default_headers
+        self._timeout = timeout
+        
+        # Main client with SSL verification
         self.client = httpx.AsyncClient(
             headers=default_headers,
             follow_redirects=True,
             timeout=timeout,
         )
+        
+        # Client without SSL verification (for problematic certificates)
+        self._insecure_client: Optional[httpx.AsyncClient] = None
+    
+    def _is_ssl_error(self, error: Exception) -> bool:
+        """Check if error is SSL-related."""
+        error_str = str(error).lower()
+        return any(pattern in error_str for pattern in self.SSL_ERROR_PATTERNS)
+    
+    async def _get_insecure_client(self) -> httpx.AsyncClient:
+        """Get or create client without SSL verification."""
+        if self._insecure_client is None:
+            self._insecure_client = httpx.AsyncClient(
+                headers=self._headers,
+                follow_redirects=True,
+                timeout=self._timeout,
+                verify=False,
+            )
+        return self._insecure_client
 
     @retry(
         stop=stop_after_attempt(3),
@@ -59,9 +94,10 @@ class AsyncHttpClient:
         retry=retry_if_exception_type((httpx.RequestError, httpx.TimeoutException)),
         reraise=True,
     )
-    async def _fetch_with_retry(self, url: str) -> httpx.Response:
+    async def _fetch_with_retry(self, url: str, use_insecure: bool = False) -> httpx.Response:
         """Fetch with retry logic."""
-        response = await self.client.get(url)
+        client = await self._get_insecure_client() if use_insecure else self.client
+        response = await client.get(url)
         response.raise_for_status()
         return response
 
@@ -89,9 +125,27 @@ class AsyncHttpClient:
             # Detect DNS resolution errors
             if any(err in error_str for err in self.CONNECTION_ERROR_PATTERNS):
                 raise DomainUnreachableError(f"Домен недоступен: {url}") from e
+            # Retry with disabled SSL verification for certificate errors
+            if self._is_ssl_error(e):
+                logger.debug(f"SSL error for {url}, retrying without verification")
+                try:
+                    response = await self._fetch_with_retry(url, use_insecure=True)
+                    return response.text
+                except Exception as retry_error:
+                    logger.warning(f"SSL retry also failed for {url}: {retry_error}")
+                    return None
             logger.warning(f"Connection error for {url}: {e}")
             return None
         except httpx.RequestError as e:
+            # Check for SSL errors wrapped in RequestError
+            if self._is_ssl_error(e):
+                logger.debug(f"SSL error for {url}, retrying without verification")
+                try:
+                    response = await self._fetch_with_retry(url, use_insecure=True)
+                    return response.text
+                except Exception as retry_error:
+                    logger.warning(f"SSL retry also failed for {url}: {retry_error}")
+                    return None
             logger.warning(f"Request failed after retries for {url}: {e}")
             return None
 
@@ -108,6 +162,14 @@ class AsyncHttpClient:
         try:
             return await self._fetch_with_retry(url)
         except (httpx.HTTPStatusError, httpx.RequestError) as e:
+            # Retry with disabled SSL verification for certificate errors
+            if self._is_ssl_error(e):
+                logger.debug(f"SSL error for {url}, retrying without verification")
+                try:
+                    return await self._fetch_with_retry(url, use_insecure=True)
+                except Exception as retry_error:
+                    logger.debug(f"SSL retry also failed for {url}: {retry_error}")
+                    return None
             logger.debug(f"Fetch failed for {url}: {e}")
             return None
 
@@ -117,6 +179,7 @@ class AsyncHttpClient:
         
         Uses HEAD request with short timeout, falls back to GET if HEAD fails.
         Some servers don't support HEAD or disconnect on HEAD requests.
+        Automatically retries without SSL verification if certificate issues occur.
         
         Args:
             url: URL to check
@@ -124,29 +187,56 @@ class AsyncHttpClient:
         Raises:
             DomainUnreachableError: If domain is unreachable (DNS/network issues)
         """
+        async def _try_check(verify: bool = True) -> bool:
+            """Try domain check with specified SSL verification setting."""
+            try:
+                async with httpx.AsyncClient(timeout=10.0, verify=verify) as client:
+                    # Try HEAD first (faster)
+                    try:
+                        response = await client.head(url, follow_redirects=True)
+                        logger.debug(f"Domain check (HEAD, verify={verify}): {url} -> {response.status_code}")
+                        return True
+                    except httpx.RequestError as head_error:
+                        # Check for SSL errors on HEAD
+                        if self._is_ssl_error(head_error) and verify:
+                            raise  # Will be caught and retried without verification
+                        # HEAD failed, try GET as fallback (some servers don't support HEAD)
+                        logger.debug(f"HEAD request failed for {url}, trying GET: {head_error}")
+                        response = await client.get(url, follow_redirects=True)
+                        logger.debug(f"Domain check (GET, verify={verify}): {url} -> {response.status_code}")
+                        return True
+            except httpx.ConnectError as e:
+                error_str = str(e).lower()
+                if any(err in error_str for err in self.CONNECTION_ERROR_PATTERNS):
+                    raise DomainUnreachableError(f"Домен недоступен: {url}") from e
+                # Check for SSL error - will be retried
+                if self._is_ssl_error(e) and verify:
+                    raise
+                raise DomainUnreachableError(f"Не удалось подключиться к домену: {url}") from e
+            except httpx.ConnectTimeout:
+                raise DomainUnreachableError(f"Таймаут подключения к домену: {url}")
+            except httpx.RequestError as e:
+                # Check for SSL error - will be retried
+                if self._is_ssl_error(e) and verify:
+                    raise
+                raise DomainUnreachableError(f"Ошибка запроса к домену: {url}") from e
+        
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                # Try HEAD first (faster)
-                try:
-                    response = await client.head(url, follow_redirects=True)
-                    logger.debug(f"Domain check (HEAD): {url} -> {response.status_code}")
-                    return
-                except httpx.RequestError as head_error:
-                    # HEAD failed, try GET as fallback (some servers don't support HEAD)
-                    logger.debug(f"HEAD request failed for {url}, trying GET: {head_error}")
-                    response = await client.get(url, follow_redirects=True)
-                    logger.debug(f"Domain check (GET): {url} -> {response.status_code}")
-        except httpx.ConnectError as e:
-            error_str = str(e).lower()
-            if any(err in error_str for err in self.CONNECTION_ERROR_PATTERNS):
-                raise DomainUnreachableError(f"Домен недоступен: {url}") from e
-            raise DomainUnreachableError(f"Не удалось подключиться к домену: {url}") from e
-        except httpx.ConnectTimeout:
-            raise DomainUnreachableError(f"Таймаут подключения к домену: {url}")
+            # First try with SSL verification
+            await _try_check(verify=True)
+        except (httpx.ConnectError, httpx.RequestError) as e:
+            # If SSL error, retry without verification
+            if self._is_ssl_error(e):
+                logger.debug(f"SSL error checking {url}, retrying without verification")
+                await _try_check(verify=False)
+            else:
+                raise
 
     async def close(self):
-        """Close the HTTP client."""
+        """Close the HTTP clients."""
         await self.client.aclose()
+        if self._insecure_client is not None:
+            await self._insecure_client.aclose()
 
     async def __aenter__(self):
         return self

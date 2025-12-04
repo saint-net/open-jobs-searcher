@@ -127,7 +127,9 @@ class BrowserLoader:
 
         page: Optional[Page] = None
         try:
-            page = await self._browser.new_page()
+            # Create page with HTTPS errors ignored (for sites with certificate issues)
+            context = await self._browser.new_context(ignore_https_errors=True)
+            page = await context.new_page()
             
             # Устанавливаем User-Agent (полный, чтобы избежать блокировок)
             await page.set_extra_http_headers({
@@ -172,7 +174,9 @@ class BrowserLoader:
             return None
         finally:
             if page:
+                context = page.context
                 await page.close()
+                await context.close()
 
     async def fetch_with_navigation(self, url: str, max_attempts: int = 2) -> tuple[Optional[str], Optional[str]]:
         """
@@ -192,8 +196,11 @@ class BrowserLoader:
             await self.start()
 
         page: Optional[Page] = None
+        context = None
         try:
-            page = await self._browser.new_page()
+            # Create page with HTTPS errors ignored (for sites with certificate issues)
+            context = await self._browser.new_context(ignore_https_errors=True)
+            page = await context.new_page()
             
             await page.set_extra_http_headers({
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -317,6 +324,8 @@ class BrowserLoader:
         finally:
             if page:
                 await page.close()
+            if context:
+                await context.close()
 
     def _is_external_job_board(self, url: str) -> bool:
         """Check if URL is an external job board platform."""
