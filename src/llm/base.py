@@ -114,7 +114,7 @@ class BaseLLMProvider(ABC):
 
     async def extract_jobs(self, html: str, url: str) -> list[dict]:
         """
-        Extract job listings from HTML page with retry logic.
+        Extract job listings from HTML page using hybrid approach.
 
         Args:
             html: HTML content of the careers page
@@ -123,24 +123,28 @@ class BaseLLMProvider(ABC):
         Returns:
             List of job dictionaries
         """
+        from src.extraction import HybridJobExtractor
+        
+        # Create hybrid extractor with LLM fallback
+        extractor = HybridJobExtractor(
+            llm_extract_fn=self._llm_extract_jobs
+        )
+        
+        # Use hybrid extraction
+        jobs = await extractor.extract(html, url)
+        
+        if jobs:
+            logger.debug(f"Hybrid extraction found {len(jobs)} jobs from {url}")
+            # Validate job structure
+            valid_jobs = self._validate_jobs(jobs)
+            return valid_jobs
+        
+        logger.warning(f"Failed to extract jobs from {url}")
+        return []
+    
+    async def _llm_extract_jobs(self, html: str, url: str) -> list[dict]:
+        """LLM-based job extraction (used as fallback by hybrid extractor)."""
         from .prompts import EXTRACT_JOBS_PROMPT
-        
-        # First try to find JSON data in script tags (SSR/schema.org)
-        json_jobs = self._extract_json_from_scripts(html)
-        if json_jobs:
-            logger.debug(f"Found {len(json_jobs)} jobs from schema.org data")
-            return json_jobs
-        
-        # Try direct pattern-based extraction for German/international job pages
-        pattern_jobs = self._extract_jobs_by_pattern(html, url)
-        if pattern_jobs:
-            logger.debug(f"Found {len(pattern_jobs)} jobs via pattern extraction")
-            # If found few jobs, also try LLM - page might have jobs without gender notation
-            if len(pattern_jobs) < 10:
-                # Will merge with LLM results later
-                pass
-            else:
-                return pattern_jobs
         
         # Try to extract only the main content (where jobs usually are)
         main_html = self._extract_main_content(html)
@@ -151,7 +155,7 @@ class BaseLLMProvider(ABC):
         # Limit HTML size (80000 chars for large pages)
         html_truncated = clean_html[:80000] if len(clean_html) > 80000 else clean_html
         
-        logger.debug(f"Extracting jobs from {url}, HTML size: {len(html_truncated)} chars")
+        logger.debug(f"LLM extracting jobs from {url}, HTML size: {len(html_truncated)} chars")
 
         prompt = EXTRACT_JOBS_PROMPT.format(
             url=url,
@@ -159,33 +163,17 @@ class BaseLLMProvider(ABC):
         )
 
         # Retry extraction if result is empty (LLM can be inconsistent)
-        llm_jobs = []
         for attempt in range(self.MAX_EXTRACTION_RETRIES):
             response = await self.complete(prompt)
             jobs = self._extract_json(response)
             
             if isinstance(jobs, list) and len(jobs) > 0:
-                # Validate job structure
-                valid_jobs = self._validate_jobs(jobs)
-                if valid_jobs:
-                    logger.debug(f"Extracted {len(valid_jobs)} jobs via LLM on attempt {attempt + 1}")
-                    llm_jobs = valid_jobs
-                    break
+                logger.debug(f"LLM extracted {len(jobs)} jobs on attempt {attempt + 1}")
+                return jobs
             
             if attempt < self.MAX_EXTRACTION_RETRIES - 1:
-                logger.debug(f"Extraction attempt {attempt + 1} returned no jobs, retrying...")
+                logger.debug(f"LLM attempt {attempt + 1} returned no jobs, retrying...")
         
-        # Merge pattern jobs with LLM jobs (if we have both)
-        if pattern_jobs and llm_jobs:
-            merged = self._merge_job_lists(pattern_jobs, llm_jobs)
-            logger.debug(f"Merged pattern ({len(pattern_jobs)}) + LLM ({len(llm_jobs)}) = {len(merged)} jobs")
-            return merged
-        elif pattern_jobs:
-            return pattern_jobs
-        elif llm_jobs:
-            return llm_jobs
-        
-        logger.warning(f"Failed to extract jobs from {url} after {self.MAX_EXTRACTION_RETRIES} attempts")
         return []
     
     # Non-job titles to filter out (open applications, general inquiries, etc.)
@@ -235,206 +223,6 @@ class BaseLLMProvider(ABC):
                 return True
         return False
     
-    def _merge_job_lists(self, pattern_jobs: list[dict], llm_jobs: list[dict]) -> list[dict]:
-        """Merge jobs from pattern extraction and LLM, avoiding duplicates.
-        
-        Pattern jobs have priority (usually more accurate with URLs).
-        LLM jobs are added if not already present.
-        """
-        merged = list(pattern_jobs)
-        seen_titles = {self._normalize_title(j.get('title', '')) for j in pattern_jobs}
-        
-        for job in llm_jobs:
-            normalized = self._normalize_title(job.get('title', ''))
-            if normalized and normalized not in seen_titles:
-                merged.append(job)
-                seen_titles.add(normalized)
-        
-        return merged
-    
-    def _normalize_title(self, title: str) -> str:
-        """Normalize job title for comparison (lowercase, no gender notation)."""
-        if not title:
-            return ""
-        # Remove gender notation and normalize whitespace
-        normalized = re.sub(r'\s*\([mwfdx/]+\)\s*', '', title.lower())
-        normalized = re.sub(r'\s+', ' ', normalized).strip()
-        return normalized
-
-    def _extract_jobs_by_pattern(self, html: str, url: str) -> list[dict]:
-        """
-        Extract jobs using pattern matching for common job title formats.
-        Works well for German/international job pages with (m/w/d) or (m/f/d) notation.
-        """
-        from bs4 import BeautifulSoup
-        from urllib.parse import urljoin
-        
-        soup = BeautifulSoup(html, 'lxml')
-        jobs = []
-        seen_titles = set()
-        
-        # Pattern for job titles with gender notation
-        # Matches: "Job Title (m/w/d)", "Position (m/f/d)", "Rolle (w/m/d)", "Manager (m/d/w)"
-        # Note: Some German/Austrian companies use (m/d/w) with d before w
-        job_pattern = re.compile(r'\((?:m/w/d|w/m/d|m/f/d|f/m/d|m/w/x|m/d/w|w/d/m|d/m/w|all genders)\)', re.IGNORECASE)
-        
-        # Find all text containing gender notation
-        for elem in soup.find_all(string=lambda t: t and job_pattern.search(t)):
-            text = str(elem).strip()
-            
-            # Skip if text is too long (probably not a job title) or too short
-            if len(text) > 120 or len(text) < 5:
-                continue
-            
-            # Skip standalone notation like just "(m/w/d)"
-            if text in ('(m/w/d)', '(m/f/d)', '(w/m/d)', '(f/m/d)'):
-                continue
-            
-            # Skip duplicates
-            if text.lower() in seen_titles:
-                continue
-            seen_titles.add(text.lower())
-            
-            # Try to find link URL from parent elements
-            job_url = url
-            parent = elem.parent
-            for _ in range(6):
-                if parent and parent.name == 'a' and parent.get('href'):
-                    href = parent.get('href')
-                    if href and not href.startswith('#') and not href.startswith('javascript:'):
-                        job_url = urljoin(url, href)
-                        break
-                if parent:
-                    parent = parent.parent
-            
-            # Try to find location and company near the job title
-            location = self._find_job_location(elem)
-            company = self._find_job_company(elem)
-            
-            jobs.append({
-                "title": text,
-                "location": location,
-                "url": job_url,
-                "department": None,
-                "company": company,  # Company name from job card
-            })
-        
-        return jobs
-    
-    def _find_job_company(self, elem) -> str:
-        """Try to find company name near a job title element."""
-        # Look in parent/sibling elements for company name
-        parent = elem.parent
-        for _ in range(5):
-            if not parent:
-                break
-            
-            # Get all text from the job card
-            card_text = parent.get_text(separator=' ', strip=True)
-            
-            # Common company name patterns in German job listings
-            # e.g., "2R Software, S&F Software und ZEDAL, Teilzeit/Vollzeit..."
-            # Company names usually come before location/time info
-            company_pattern = re.compile(
-                r'^([A-Za-z0-9äöüÄÖÜß&\s\-\.]+(?:GmbH|AG|Software|IT|Tech|Solutions)?)'
-                r'(?:,|\s+und\s+|\s*[,;]\s*)',
-                re.IGNORECASE
-            )
-            
-            # Look for bold/strong text which often contains company name
-            for strong in parent.find_all(['strong', 'b']):
-                strong_text = strong.get_text(strip=True)
-                if strong_text and len(strong_text) < 100:
-                    # Check if it looks like a company name
-                    if any(kw in strong_text.lower() for kw in ['software', 'gmbh', 'ag', 'zedal', '2r']):
-                        return strong_text
-            
-            parent = parent.parent
-        
-        return ""
-
-    def _find_job_location(self, elem) -> str:
-        """Try to find location information near a job title element."""
-        # Common location patterns
-        location_keywords = ['remote', 'home office', 'vollzeit', 'teilzeit', 
-                           'deutschland', 'germany', 'austria', 'österreich',
-                           'schweiz', 'switzerland']
-        
-        # Check parent and siblings for location info
-        parent = elem.parent
-        for _ in range(4):
-            if not parent:
-                break
-            
-            text = parent.get_text(separator=' ', strip=True).lower()
-            
-            # Look for city/location patterns
-            for keyword in location_keywords:
-                if keyword in text:
-                    # Try to extract specific city
-                    city_pattern = re.compile(r'(?:in|standort|location|ort)[:\s]+([A-Za-zäöüÄÖÜß]+)', re.IGNORECASE)
-                    match = city_pattern.search(text)
-                    if match:
-                        return match.group(1).title()
-                    
-                    if 'remote' in text or 'home office' in text:
-                        return 'Remote'
-                    if 'deutschland' in text or 'germany' in text:
-                        return 'Germany'
-            
-            parent = parent.parent
-        
-        return "Unknown"
-
-    def _extract_json_from_scripts(self, html: str) -> list[dict]:
-        """Попытка извлечь JSON с вакансиями из script тегов (SSR/hydration)."""
-        import re
-        import json
-        
-        # Ищем script теги с JSON данными
-        script_pattern = r'<script[^>]*type=["\']application/(?:ld\+)?json["\'][^>]*>([\s\S]*?)</script>'
-        scripts = re.findall(script_pattern, html, re.IGNORECASE)
-        
-        jobs = []
-        for script_content in scripts:
-            try:
-                data = json.loads(script_content)
-                # Ищем JobPosting schema.org
-                if isinstance(data, dict):
-                    if data.get("@type") == "JobPosting":
-                        jobs.append(self._parse_schema_job(data))
-                    elif data.get("@graph"):
-                        for item in data["@graph"]:
-                            if item.get("@type") == "JobPosting":
-                                jobs.append(self._parse_schema_job(item))
-                elif isinstance(data, list):
-                    for item in data:
-                        if isinstance(item, dict) and item.get("@type") == "JobPosting":
-                            jobs.append(self._parse_schema_job(item))
-            except (json.JSONDecodeError, TypeError):
-                continue
-        
-        return jobs
-
-    def _parse_schema_job(self, data: dict) -> dict:
-        """Парсинг вакансии из schema.org JobPosting."""
-        location = "Unknown"
-        if data.get("jobLocation"):
-            loc = data["jobLocation"]
-            if isinstance(loc, dict):
-                addr = loc.get("address", {})
-                if isinstance(addr, dict):
-                    location = addr.get("addressLocality", "Unknown")
-                elif isinstance(addr, str):
-                    location = addr
-        
-        return {
-            "title": data.get("title", "Unknown"),
-            "location": location,
-            "url": data.get("url", ""),
-            "department": data.get("industry", None),
-        }
-
     def _extract_main_content(self, html: str) -> str:
         """Extract main content area from HTML (where jobs are usually located)."""
         from bs4 import BeautifulSoup
