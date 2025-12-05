@@ -13,6 +13,7 @@ from src.config import settings
 from src.searchers import HeadHunterSearcher, WebsiteSearcher, StepStoneSearcher, KarriereATSearcher
 from src.llm import get_llm_provider
 from src.output import display_jobs, save_jobs, display_execution_time
+from src.browser import PlaywrightBrowsersNotInstalledError
 
 # Configure logging
 logging.basicConfig(
@@ -377,6 +378,10 @@ async def _search_website(url: str, provider: str, model: Optional[str], use_bro
                 console.print("[yellow]⚠[/yellow] Вакансии не найдены")
             
             return jobs
+        except PlaywrightBrowsersNotInstalledError as e:
+            console.print(f"[red]✗[/red] {e}")
+            console.print("[yellow]💡[/yellow] Попробуйте установить браузеры вручную: [bold]playwright install chromium[/bold]")
+            return []
         except Exception as e:
             console.print(f"[red]✗[/red] Ошибка: {e}")
             return []

@@ -15,7 +15,7 @@ from src.searchers.job_boards import (
     find_external_job_board,
 )
 from src.llm.base import BaseLLMProvider
-from src.browser import DomainUnreachableError
+from src.browser import DomainUnreachableError, PlaywrightBrowsersNotInstalledError
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +292,7 @@ class WebsiteSearcher(BaseSearcher):
                 return await loader.fetch_with_navigation(url)
             html = await loader.fetch(url)
             return html, url
-        except DomainUnreachableError:
+        except (DomainUnreachableError, PlaywrightBrowsersNotInstalledError):
             raise
         except Exception as e:
             logger.warning(f"Browser fetch error for {url}: {e}")

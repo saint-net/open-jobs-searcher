@@ -135,7 +135,12 @@ class BaseLLMProvider(ABC):
         pattern_jobs = self._extract_jobs_by_pattern(html, url)
         if pattern_jobs:
             logger.debug(f"Found {len(pattern_jobs)} jobs via pattern extraction")
-            return pattern_jobs
+            # If found few jobs, also try LLM - page might have jobs without gender notation
+            if len(pattern_jobs) < 10:
+                # Will merge with LLM results later
+                pass
+            else:
+                return pattern_jobs
         
         # Try to extract only the main content (where jobs usually are)
         main_html = self._extract_main_content(html)
@@ -154,6 +159,7 @@ class BaseLLMProvider(ABC):
         )
 
         # Retry extraction if result is empty (LLM can be inconsistent)
+        llm_jobs = []
         for attempt in range(self.MAX_EXTRACTION_RETRIES):
             response = await self.complete(prompt)
             jobs = self._extract_json(response)
@@ -162,11 +168,22 @@ class BaseLLMProvider(ABC):
                 # Validate job structure
                 valid_jobs = self._validate_jobs(jobs)
                 if valid_jobs:
-                    logger.debug(f"Extracted {len(valid_jobs)} jobs on attempt {attempt + 1}")
-                    return valid_jobs
+                    logger.debug(f"Extracted {len(valid_jobs)} jobs via LLM on attempt {attempt + 1}")
+                    llm_jobs = valid_jobs
+                    break
             
             if attempt < self.MAX_EXTRACTION_RETRIES - 1:
                 logger.debug(f"Extraction attempt {attempt + 1} returned no jobs, retrying...")
+        
+        # Merge pattern jobs with LLM jobs (if we have both)
+        if pattern_jobs and llm_jobs:
+            merged = self._merge_job_lists(pattern_jobs, llm_jobs)
+            logger.debug(f"Merged pattern ({len(pattern_jobs)}) + LLM ({len(llm_jobs)}) = {len(merged)} jobs")
+            return merged
+        elif pattern_jobs:
+            return pattern_jobs
+        elif llm_jobs:
+            return llm_jobs
         
         logger.warning(f"Failed to extract jobs from {url} after {self.MAX_EXTRACTION_RETRIES} attempts")
         return []
@@ -217,6 +234,32 @@ class BaseLLMProvider(ABC):
             if re.search(pattern, title_lower, re.IGNORECASE):
                 return True
         return False
+    
+    def _merge_job_lists(self, pattern_jobs: list[dict], llm_jobs: list[dict]) -> list[dict]:
+        """Merge jobs from pattern extraction and LLM, avoiding duplicates.
+        
+        Pattern jobs have priority (usually more accurate with URLs).
+        LLM jobs are added if not already present.
+        """
+        merged = list(pattern_jobs)
+        seen_titles = {self._normalize_title(j.get('title', '')) for j in pattern_jobs}
+        
+        for job in llm_jobs:
+            normalized = self._normalize_title(job.get('title', ''))
+            if normalized and normalized not in seen_titles:
+                merged.append(job)
+                seen_titles.add(normalized)
+        
+        return merged
+    
+    def _normalize_title(self, title: str) -> str:
+        """Normalize job title for comparison (lowercase, no gender notation)."""
+        if not title:
+            return ""
+        # Remove gender notation and normalize whitespace
+        normalized = re.sub(r'\s*\([mwfdx/]+\)\s*', '', title.lower())
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        return normalized
 
     def _extract_jobs_by_pattern(self, html: str, url: str) -> list[dict]:
         """
@@ -231,8 +274,9 @@ class BaseLLMProvider(ABC):
         seen_titles = set()
         
         # Pattern for job titles with gender notation
-        # Matches: "Job Title (m/w/d)", "Position (m/f/d)", "Rolle (w/m/d)"
-        job_pattern = re.compile(r'\((?:m/w/d|w/m/d|m/f/d|f/m/d|m/w/x|all genders)\)', re.IGNORECASE)
+        # Matches: "Job Title (m/w/d)", "Position (m/f/d)", "Rolle (w/m/d)", "Manager (m/d/w)"
+        # Note: Some German/Austrian companies use (m/d/w) with d before w
+        job_pattern = re.compile(r'\((?:m/w/d|w/m/d|m/f/d|f/m/d|m/w/x|m/d/w|w/d/m|d/m/w|all genders)\)', re.IGNORECASE)
         
         # Find all text containing gender notation
         for elem in soup.find_all(string=lambda t: t and job_pattern.search(t)):

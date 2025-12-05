@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from playwright.async_api import async_playwright, Browser, Page, Playwright
 
-from .exceptions import DomainUnreachableError
+from .exceptions import DomainUnreachableError, PlaywrightBrowsersNotInstalledError
 from .patterns import DEFAULT_USER_AGENT, NETWORK_ERROR_PATTERNS
 from .cookie_handler import handle_cookie_consent
 from .navigation import (
@@ -41,13 +41,49 @@ class BrowserLoader:
             self._playwright = await async_playwright().start()
             # Launch browser with clean context (no cookies from previous sessions)
             # Add Chromium args to allow third-party cookies (needed for HRworks and similar job boards)
-            self._browser = await self._playwright.chromium.launch(
-                headless=self.headless,
-                args=[
-                    "--disable-features=SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure",
-                    "--disable-site-isolation-trials",
-                ],
-            )
+            try:
+                self._browser = await self._playwright.chromium.launch(
+                    headless=self.headless,
+                    args=[
+                        "--disable-features=SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure",
+                        "--disable-site-isolation-trials",
+                    ],
+                )
+            except Exception as e:
+                error_str = str(e)
+                # Check if the error is about missing browser executable
+                if "Executable doesn't exist" in error_str or "executable doesn't exist" in error_str:
+                    # Try to install browsers automatically
+                    try:
+                        import subprocess
+                        import sys
+                        logger.info("Браузеры Playwright не установлены. Устанавливаю автоматически...")
+                        # Use subprocess to run: python -m playwright install chromium
+                        result = subprocess.run(
+                            [sys.executable, "-m", "playwright", "install", "chromium"],
+                            capture_output=True,
+                            text=True,
+                            timeout=300,  # 5 minutes timeout
+                        )
+                        if result.returncode != 0:
+                            raise Exception(f"Installation failed: {result.stderr}")
+                        logger.info("Браузеры установлены. Повторяю запуск...")
+                        # Retry after installation
+                        self._browser = await self._playwright.chromium.launch(
+                            headless=self.headless,
+                            args=[
+                                "--disable-features=SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure",
+                                "--disable-site-isolation-trials",
+                            ],
+                        )
+                    except Exception as install_error:
+                        raise PlaywrightBrowsersNotInstalledError(
+                            "Браузеры Playwright не установлены. "
+                            "Установите их вручную командой: python -m playwright install chromium\n"
+                            f"Ошибка установки: {install_error}"
+                        ) from e
+                else:
+                    raise
 
     async def stop(self):
         """Остановить браузер."""

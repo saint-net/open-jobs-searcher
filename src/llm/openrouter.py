@@ -33,7 +33,7 @@ class OpenRouterProvider(BaseLLMProvider):
     def __init__(
         self,
         api_key: str,
-        model: str = "openai/gpt-oss-20b",
+        model: str = "openai/gpt-oss-120b",
         timeout: float = 300.0,
     ):
         """
