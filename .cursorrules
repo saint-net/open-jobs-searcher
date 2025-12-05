@@ -1,0 +1,99 @@
+# Правила и контекст для Cursor AI
+
+## Язык и стиль кода
+- Проект написан на Python 3.10+
+- Используется async/await для асинхронных операций
+- Типизация: используйте type hints везде, где возможно
+- Документация: все публичные функции и классы должны иметь docstrings
+- Форматирование: black (line-length=100), ruff для линтинга
+- Комментарии: на русском языке для бизнес-логики, на английском для технических деталей
+
+## Архитектура проекта
+
+### Структура модулей
+- `src/searchers/` - поисковики вакансий (HeadHunter, StepStone, Karriere, Website)
+- `src/searchers/job_boards/` - парсеры для популярных job board платформ
+- `src/llm/` - провайдеры LLM (Ollama, OpenRouter) с единым интерфейсом BaseLLMProvider
+- `src/browser/` - модули для работы с Playwright (загрузка SPA, навигация, cookies)
+- `src/config.py` - настройки через Pydantic Settings
+- `src/models.py` - модели данных (Pydantic)
+- `src/output.py` - форматирование и вывод результатов
+
+### Паттерны проектирования
+- **Strategy Pattern**: BaseSearcher, BaseLLMProvider, BaseJobBoardParser
+- **Factory Pattern**: get_llm_provider(), JobBoardParserRegistry
+- **Context Manager**: все searchers используют async context managers
+- **Retry Pattern**: AsyncHttpClient с автоматическими retry
+
+### Асинхронность
+- Все HTTP запросы асинхронные (httpx, aiohttp)
+- Браузерные операции через Playwright async API
+- Используйте asyncio.run() только в точках входа (main.py)
+
+### Обработка ошибок
+- Используйте кастомные исключения из `src/browser/exceptions.py`
+- Логирование через стандартный logging модуль
+- При ошибках парсинга - возвращайте пустой список, не бросайте исключения
+
+### LLM интеграция
+- Все LLM провайдеры наследуют BaseLLMProvider
+- Промпты хранятся в `src/llm/prompts.py`
+- Структурированный вывод через JSON schema
+- Обработка rate limits и retry логика в провайдерах
+
+### Job Board парсинг
+- Автоматическое определение платформы через `detector.py`
+- Реестр парсеров в `registry.py`
+- Каждый парсер наследует BaseJobBoardParser
+- Поддержка как HTML парсинга, так и API-based платформ (Recruitee)
+
+### Браузерная автоматизация
+- Используется только для SPA сайтов (React/Vue/Angular)
+- Автоматическая обработка cookie consent
+- Поиск внешних job board iframes
+- Навигация по careers страницам
+
+## Конвенции именования
+- Классы: PascalCase (BaseSearcher, HeadHunterSearcher)
+- Функции/методы: snake_case (search_jobs, parse_html)
+- Константы: UPPER_SNAKE_CASE (DEFAULT_TIMEOUT, MAX_RETRIES)
+- Приватные методы: начинаются с _ (_parse_job, _build_url)
+
+## Тестирование
+- Используйте pytest для тестов
+- Моки для внешних API и браузера
+- Тесты должны быть быстрыми и изолированными
+
+## Конфигурация
+- Все настройки через Pydantic Settings в `src/config.py`
+- Переменные окружения в `.env` файле
+- Значения по умолчанию должны быть разумными
+
+## Добавление новых фич
+
+### Новый поисковик
+1. Наследуйте BaseSearcher
+2. Реализуйте метод `search()`
+3. Используйте async context manager
+4. Добавьте в `main.py` новую команду
+
+### Новый LLM провайдер
+1. Наследуйте BaseLLMProvider
+2. Реализуйте `parse_jobs()` и `extract_jobs()`
+3. Добавьте в `get_llm_provider()` factory
+4. Обновите документацию
+
+### Новый Job Board парсер
+1. Наследуйте BaseJobBoardParser
+2. Реализуйте `parse()` метод
+3. Зарегистрируйте в JobBoardParserRegistry
+4. Добавьте паттерн в detector.py
+
+## Важные замечания
+- Всегда проверяйте наличие данных перед парсингом
+- Используйте BeautifulSoup для HTML парсинга
+- Для API запросов - httpx с retry логикой
+- Не хардкодьте URL и селекторы - используйте конфигурацию
+- Логируйте важные события (найденные вакансии, ошибки)
+- Поддерживайте обратную совместимость при изменении API
+
