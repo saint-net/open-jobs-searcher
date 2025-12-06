@@ -31,9 +31,10 @@ class DeloitteParser(BaseJobBoardParser):
         # Extract search term from URL for filtering
         search_term = self._extract_search_term(base_url)
         
-        # Deloitte job links typically contain /job/ or /stelle/ in the path
-        # and have job titles in the link text
+        # Deloitte job links typically contain /job- or /job/ or /stelle/ in the path
+        # Format: /job-<title-slug>_<id> (e.g., /job-working-student-startup_49642)
         job_link_patterns = [
+            r'/job-',  # Main Deloitte format: /job-title-slug_id
             r'/job/',
             r'/stelle/',
             r'/position/',
