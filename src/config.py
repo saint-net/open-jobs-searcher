@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     ollama_url: str = Field(
         default="http://localhost:11434", description="URL Ollama сервера"
     )
+    
+    # OpenRouter provider routing
+    # Доступные провайдеры для gpt-oss-120b: chutes, siliconflow, novitaai, gmicloud, deepinfra, ncompass
+    openrouter_provider: str = Field(
+        default="chutes", description="Конкретный провайдер OpenRouter (например: chutes)"
+    )
+    openrouter_allow_fallbacks: bool = Field(
+        default=True, description="Разрешать fallback на другие провайдеры"
+    )
 
     # OpenAI (для будущего использования)
     openai_api_key: str = Field(default="", description="OpenAI API ключ")

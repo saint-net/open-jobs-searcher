@@ -469,6 +469,11 @@ def website(
         "-m",
         help="Модель LLM (по умолчанию: gpt-oss:20b для ollama, openai/gpt-oss-20b для openrouter)",
     ),
+    openrouter_provider: Optional[str] = typer.Option(
+        None,
+        "--openrouter-provider",
+        help="Бэкенд-провайдер OpenRouter (chutes, siliconflow, novitaai, gmicloud, deepinfra)",
+    ),
     output: Optional[str] = typer.Option(
         None,
         "--output",
@@ -505,8 +510,14 @@ def website(
     if display_model is None:
         display_model = "gpt-oss:20b" if provider == "ollama" else "openai/gpt-oss-120b"
     
+    # Определяем бэкенд-провайдер для отображения (из CLI или из настроек)
+    display_backend = openrouter_provider or (settings.openrouter_provider if provider == "openrouter" else None)
+    
     console.print(f"[bold blue]🌐 Сайт:[/bold blue] {url}")
-    console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({display_model})")
+    if display_backend:
+        console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider}/{display_backend} ({display_model})")
+    else:
+        console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({display_model})")
     if browser:
         console.print(f"[bold blue]🌐 Режим:[/bold blue] браузер (Playwright)")
     if nodb:
@@ -514,7 +525,11 @@ def website(
     console.print()
 
     # Run async search
-    jobs, sync_result = asyncio.run(_search_website(url, provider, model, browser, use_cache=not nodb))
+    jobs, sync_result = asyncio.run(_search_website(
+        url, provider, model, browser, 
+        use_cache=not nodb, 
+        openrouter_provider=openrouter_provider
+    ))
     
     # Отображаем результаты синхронизации (новые/удалённые)
     if not nodb:
@@ -535,7 +550,8 @@ async def _search_website(
     provider: str, 
     model: Optional[str], 
     use_browser: bool,
-    use_cache: bool = True
+    use_cache: bool = True,
+    openrouter_provider: Optional[str] = None,
 ) -> tuple:
     """Асинхронный поиск вакансий на сайте.
     
@@ -545,6 +561,7 @@ async def _search_website(
         model: Модель LLM
         use_browser: Использовать браузер
         use_cache: Использовать кэширование в SQLite
+        openrouter_provider: Бэкенд-провайдер OpenRouter (chutes, siliconflow и т.д.)
     
     Returns:
         Tuple (jobs, sync_result) - sync_result может быть None при первом запуске или если use_cache=False
@@ -557,7 +574,11 @@ async def _search_website(
             model = "openai/gpt-oss-120b"
     
     try:
-        llm = get_llm_provider(provider, model=model)
+        # Передаём openrouter_provider если указан
+        llm_kwargs = {"model": model}
+        if openrouter_provider:
+            llm_kwargs["provider"] = openrouter_provider
+        llm = get_llm_provider(provider, **llm_kwargs)
     except Exception as e:
         console.print(f"[red]✗[/red] Ошибка инициализации LLM: {e}")
         return [], None
@@ -650,6 +671,11 @@ def find_job_urls(
         "-m",
         help="Модель LLM",
     ),
+    openrouter_provider: Optional[str] = typer.Option(
+        None,
+        "--openrouter-provider",
+        help="Бэкенд-провайдер OpenRouter (chutes, siliconflow, novitaai, gmicloud, deepinfra)",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -668,11 +694,17 @@ def find_job_urls(
     if display_model is None:
         display_model = "gpt-oss:20b" if provider == "ollama" else "openai/gpt-oss-120b"
     
+    # Определяем бэкенд-провайдер для отображения
+    display_backend = openrouter_provider or (settings.openrouter_provider if provider == "openrouter" else None)
+    
     console.print(f"[bold blue]🌐 Страница:[/bold blue] {url}")
-    console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({display_model})")
+    if display_backend:
+        console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider}/{display_backend} ({display_model})")
+    else:
+        console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({display_model})")
     console.print()
 
-    job_urls = asyncio.run(_find_job_urls(url, provider, model))
+    job_urls = asyncio.run(_find_job_urls(url, provider, model, openrouter_provider))
     
     if job_urls:
         console.print(f"[green]✓[/green] Найдено {len(job_urls)} URL'ов вакансий:")
@@ -685,7 +717,12 @@ def find_job_urls(
     display_execution_time(time.perf_counter() - start_time)
 
 
-async def _find_job_urls(url: str, provider: str, model: Optional[str]) -> list[str]:
+async def _find_job_urls(
+    url: str, 
+    provider: str, 
+    model: Optional[str],
+    openrouter_provider: Optional[str] = None,
+) -> list[str]:
     """Асинхронный поиск URL'ов вакансий через LLM."""
     from src.browser import BrowserLoader
     
@@ -697,7 +734,10 @@ async def _find_job_urls(url: str, provider: str, model: Optional[str]) -> list[
             model = "openai/gpt-oss-120b"
     
     try:
-        llm = get_llm_provider(provider, model=model)
+        llm_kwargs = {"model": model}
+        if openrouter_provider:
+            llm_kwargs["provider"] = openrouter_provider
+        llm = get_llm_provider(provider, **llm_kwargs)
     except Exception as e:
         console.print(f"[red]✗[/red] Ошибка инициализации LLM: {e}")
         return []

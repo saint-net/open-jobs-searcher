@@ -50,20 +50,37 @@ class OpenRouterProvider(BaseLLMProvider):
         "service unavailable",
         "502", "503", "504",  # Gateway errors
     ]
+    
+    # Доступные провайдеры OpenRouter для gpt-oss-120b
+    # Список slug-ов провайдеров: https://openrouter.ai/openai/gpt-oss-120b (вкладка Providers)
+    AVAILABLE_PROVIDERS = [
+        "chutes",       # Uptime ~97.6%
+        "siliconflow",  # Uptime ~97.7%
+        "novitaai",     # Uptime ~85.5%
+        "gmicloud",     # Uptime ~88.7%
+        "deepinfra",    # Uptime ~69.3%
+        "ncompass",     # Uptime ~77.2%
+    ]
 
     def __init__(
         self,
         api_key: str,
         model: str = "openai/gpt-oss-120b",
         timeout: float = 300.0,
+        provider: Optional[str] = None,
+        provider_order: Optional[list[str]] = None,
+        allow_fallbacks: bool = True,
     ):
         """
         Инициализация OpenRouter провайдера.
 
         Args:
             api_key: API ключ OpenRouter
-            model: Название модели (например, openai/gpt-oss-20b)
+            model: Название модели (например, openai/gpt-oss-120b)
             timeout: Таймаут запросов в секундах
+            provider: Конкретный провайдер для использования (например, "chutes")
+            provider_order: Список провайдеров в порядке приоритета
+            allow_fallbacks: Разрешать ли fallback на другие провайдеры
         """
         if not api_key:
             raise ValueError("OpenRouter API key is required")
@@ -72,11 +89,38 @@ class OpenRouterProvider(BaseLLMProvider):
         self.model = model
         self.config = self.MODEL_CONFIGS.get(model, self.DEFAULT_CONFIG)
         self.client = httpx.AsyncClient(timeout=timeout)
+        
+        # Provider routing configuration
+        self.provider = provider
+        self.provider_order = provider_order
+        self.allow_fallbacks = allow_fallbacks
 
     def _is_transient_error(self, error_msg: str) -> bool:
         """Check if error is transient and should be retried."""
         error_lower = error_msg.lower()
         return any(pattern in error_lower for pattern in self.TRANSIENT_ERROR_PATTERNS)
+    
+    def _build_provider_config(self) -> Optional[dict]:
+        """
+        Построить конфигурацию provider routing для запроса.
+        
+        Returns:
+            dict с настройками провайдера или None если не указаны
+        """
+        if not self.provider and not self.provider_order:
+            return None
+        
+        config = {}
+        
+        # Если указан конкретный провайдер, используем его как единственный в order
+        if self.provider:
+            config["order"] = [self.provider]
+        elif self.provider_order:
+            config["order"] = self.provider_order
+        
+        config["allow_fallbacks"] = self.allow_fallbacks
+        
+        return config
 
     async def complete(self, prompt: str, system: Optional[str] = None) -> str:
         """Generate response via OpenRouter API with retry logic for transient errors."""
@@ -104,6 +148,11 @@ class OpenRouterProvider(BaseLLMProvider):
             "temperature": self.config["temperature"],
             "max_tokens": self.config["max_tokens"],
         }
+        
+        # Добавляем provider routing если указан
+        provider_config = self._build_provider_config()
+        if provider_config:
+            payload["provider"] = provider_config
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
