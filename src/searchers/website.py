@@ -272,7 +272,7 @@ class WebsiteSearcher(BaseSearcher):
         return sitemap_url
     
     async def _search_full_discovery(self, url: str, domain: str) -> list[Job]:
-        """Full career page discovery (first time or fallback).
+        """Full career page discovery using LLM.
         
         Args:
             url: Original URL
@@ -282,44 +282,33 @@ class WebsiteSearcher(BaseSearcher):
             List of found jobs
         """
         careers_url = None
-        career_subdomain = None
 
         try:
-            # 1. Check for career-related subdomains (e.g., jobs.example.com)
-            # Save for later - we'll also check main domain
-            career_subdomain = await self.url_discovery.discover_career_subdomain(url)
-            if career_subdomain:
-                logger.info(f"Found career subdomain: {career_subdomain}")
-            
-            # 2. Try to find careers page on MAIN domain first
-            # (often has more complete job listings than subdomain)
-            
-            # 2a. Try sitemap.xml
-            sitemap_url = await self.url_discovery.find_from_sitemap(url, llm_fallback=self.llm)
-            
-            # 2b. ALWAYS load main page and search for career nav link
-            # (even if sitemap found something - sitemap might return specific job page)
+            # 1. Load main page and sitemap URLs for LLM analysis
             html = await self._fetch(url)
-            nav_url = None
+            sitemap_urls = await self._fetch_sitemap_urls(url)
+            
+            # 2. LLM analyzes HTML + sitemap to find careers URL
             if html:
-                nav_url = self.url_discovery.find_from_html_heuristic(html, url)
-            
-            # 2c. Choose best URL between sitemap and navigation
-            careers_url = self._choose_best_careers_url(sitemap_url, nav_url)
-            
-            # 2d. If still nothing - use LLM on main page
-            if not careers_url and html:
-                careers_url = await self.llm.find_careers_url(html, url)
-
-            # 2e. Try alternative URLs directly
-            if not careers_url or careers_url == "NOT_FOUND":
-                careers_url = await self._try_alternative_urls(url)
-            
-            # 3. If no careers page on main domain, use subdomain
-            if (not careers_url or careers_url == "NOT_FOUND") and career_subdomain:
-                careers_url = career_subdomain
-            
-            if not careers_url or careers_url == "NOT_FOUND":
+                logger.info("Using LLM to find careers/jobs URL (HTML + sitemap)")
+                careers_url = await self.llm.find_careers_url(html, url, sitemap_urls)
+                
+                if careers_url and careers_url != "NOT_FOUND":
+                    logger.info(f"LLM found careers page: {careers_url}")
+                    
+                    # 3. Load careers page and look for job board URL
+                    # Many companies have a landing page that links to external job board
+                    careers_html = await self._fetch(careers_url)
+                    if careers_html:
+                        job_board_url = await self.llm.find_job_board_url(careers_html, careers_url)
+                        if job_board_url:
+                            logger.info(f"LLM found job board: {job_board_url}")
+                            careers_url = job_board_url
+                else:
+                    logger.warning(f"LLM could not find careers URL on {url}")
+                    return []
+            else:
+                logger.warning(f"Could not load page: {url}")
                 return []
 
             # 6. Load careers page (try URL variants: plural/singular)
@@ -446,32 +435,7 @@ class WebsiteSearcher(BaseSearcher):
             if not careers_html:
                 return []
 
-            # 7.5. If we have a subdomain AND we got jobs from main page,
-            # also check subdomain for additional jobs (subdomain often has more detail)
-            if career_subdomain and careers_url != career_subdomain:
-                subdomain_jobs = await self._extract_jobs_from_url(career_subdomain, url)
-                if subdomain_jobs:
-                    # Merge jobs from both sources
-                    # Start with subdomain jobs (usually more detailed with individual URLs)
-                    merged_jobs = list(subdomain_jobs)
-                    subdomain_titles = {j.get('title', '').lower().strip() for j in subdomain_jobs}
-                    
-                    # Add jobs from main page that aren't in subdomain
-                    added_from_main = 0
-                    for job in jobs_data:
-                        job_title = job.get('title', '').lower().strip()
-                        if job_title and job_title not in subdomain_titles:
-                            merged_jobs.append(job)
-                            subdomain_titles.add(job_title)
-                            added_from_main += 1
-                    
-                    if added_from_main:
-                        logger.info(f"Added {added_from_main} unique jobs from main careers page")
-                    
-                    jobs_data = merged_jobs
-                    logger.info(f"Total jobs after merge: {len(jobs_data)}")
-
-            # 8. Convert to Job models with translation
+            # 7. Convert to Job models with translation
             jobs = await self._convert_jobs_data(jobs_data, url, careers_url)
             
             # 9. Save to cache if enabled
@@ -946,3 +910,112 @@ class WebsiteSearcher(BaseSearcher):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
+
+    async def _fetch_sitemap_urls(self, base_url: str) -> list[str]:
+        """Fetch URLs from sitemap.xml (checking robots.txt first for sitemap location).
+        
+        Args:
+            base_url: Base URL of the website
+            
+        Returns:
+            List of URLs from sitemap
+        """
+        import xml.etree.ElementTree as ET
+        
+        base = base_url.rstrip('/')
+        all_urls = []
+        
+        # 1. Try to find sitemap location in robots.txt
+        sitemap_locations = []
+        try:
+            robots_txt = await self.http_client.fetch(f"{base}/robots.txt")
+            if robots_txt:
+                for line in robots_txt.split('\n'):
+                    line = line.strip()
+                    if line.lower().startswith('sitemap:'):
+                        sitemap_url = line.split(':', 1)[1].strip()
+                        sitemap_locations.append(sitemap_url)
+                        logger.debug(f"Found sitemap in robots.txt: {sitemap_url}")
+        except Exception as e:
+            logger.debug(f"robots.txt check failed: {e}")
+        
+        # 2. Always add standard locations as fallback (even if robots.txt has sitemaps)
+        standard_locations = [
+            f"{base}/sitemap.xml",
+            f"{base}/sitemap_index.xml",
+        ]
+        for loc in standard_locations:
+            if loc not in sitemap_locations:
+                sitemap_locations.append(loc)
+        
+        # 3. Parse sitemaps (try each location)
+        for sitemap_url in sitemap_locations[:3]:  # Limit to 3 sitemaps
+            try:
+                response = await self.http_client.fetch(sitemap_url)
+                if not response:
+                    continue
+                
+                # Quick XML check
+                content = response.strip()
+                if not content.startswith('<?xml') and not content.startswith('<'):
+                    logger.debug(f"Sitemap {sitemap_url} is not XML")
+                    continue
+                
+                root = ET.fromstring(content)
+                
+                # Check if this is a sitemap index (contains other sitemaps)
+                ns = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+                nested_sitemaps = root.findall('.//sm:sitemap/sm:loc', ns)
+                if not nested_sitemaps:
+                    # Try without namespace
+                    nested_sitemaps = root.findall('.//sitemap/loc')
+                
+                if nested_sitemaps:
+                    # Parse first nested sitemap (usually contains pages)
+                    for nested in nested_sitemaps[:2]:
+                        if nested.text:
+                            nested_urls = await self._parse_single_sitemap(nested.text)
+                            all_urls.extend(nested_urls)
+                            if len(all_urls) >= 300:  # Limit total URLs
+                                break
+                else:
+                    # Direct sitemap with URLs
+                    for elem in root.iter():
+                        if elem.tag.endswith('loc') and elem.text:
+                            all_urls.append(elem.text)
+                
+                if all_urls:
+                    logger.debug(f"Found {len(all_urls)} URLs from sitemap(s)")
+                    break
+                    
+            except ET.ParseError as e:
+                logger.debug(f"XML parse error for {sitemap_url}: {e}")
+            except Exception as e:
+                logger.debug(f"Sitemap {sitemap_url} failed: {e}")
+        
+        return all_urls[:300]  # Return max 300 URLs
+
+    async def _parse_single_sitemap(self, sitemap_url: str) -> list[str]:
+        """Parse URLs from a single sitemap file."""
+        import xml.etree.ElementTree as ET
+        
+        urls = []
+        try:
+            response = await self.http_client.fetch(sitemap_url)
+            if not response:
+                return urls
+            
+            content = response.strip()
+            if not content.startswith('<?xml') and not content.startswith('<'):
+                return urls
+            
+            root = ET.fromstring(content)
+            
+            for elem in root.iter():
+                if elem.tag.endswith('loc') and elem.text:
+                    urls.append(elem.text)
+                    
+        except Exception as e:
+            logger.debug(f"Failed to parse sitemap {sitemap_url}: {e}")
+        
+        return urls

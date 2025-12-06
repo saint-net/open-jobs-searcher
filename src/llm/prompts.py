@@ -1,26 +1,54 @@
 """LLM prompts for job parsing and career page discovery."""
 
-FIND_CAREERS_PAGE_PROMPT = """You are analyzing a company website to find their careers/jobs page.
+FIND_CAREERS_PAGE_PROMPT = """Find the URL where job listings are displayed for this company.
 
-Base URL: {base_url}
+Company website: {base_url}
 
-Here is the HTML content of the main page:
-
+=== HTML CONTENT ===
 {html}
 
-Task: Find the URL to the careers/jobs page where job openings are listed.
+=== SITEMAP URLs ===
+{sitemap_urls}
 
-Look for links containing keywords like:
-- English: careers, career, jobs, job, vacancies, vacancy, openings, work with us, join us, join our team, we're hiring
-- German: karriere, stellen, stellenangebote, jobangebote, offene stellen, arbeiten bei uns
-- Russian: вакансии, карьера, работа у нас
+=== YOUR TASK ===
 
-Instructions:
-1. Search for <a> tags with href attributes
-2. Look at link text and href values
-3. Return the FULL URL to the careers page
+Analyze BOTH the HTML and sitemap URLs to find the BEST link to a page with job listings.
 
-Return ONLY the URL, nothing else. If you can't find it, return "NOT_FOUND".
+This could be:
+1. **Internal careers page**: /careers, /jobs, /karriere, /stellenangebote, /vacancies
+2. **Career subdomain**: jobs.company.com, karriere.company.com, bmwgroup.jobs
+3. **External job board**: greenhouse.io, lever.co, personio.de, workday.com, successfactors.com, recruitee.com, smartrecruiters.com, ashbyhq.com
+
+=== WHERE TO SEARCH ===
+
+**In HTML:**
+- Footer links (most common place for "Careers")
+- Header/Navigation menu
+- Links to external domains with "jobs" or "careers"
+
+**In Sitemap URLs:**
+- URLs containing: /careers, /jobs, /karriere, /stellenangebote, /vacancies
+- URLs on subdomains: jobs.*, karriere.*, career.*
+- Prefer SHORTER URLs (listing pages, not individual job posts)
+
+=== KEYWORDS ===
+
+- English: careers, career, jobs, job, vacancies, openings, positions, hiring
+- German: karriere, stellen, stellenangebote, jobangebote, offene stellen
+- Russian: вакансии, карьера, работа
+
+=== PRIORITY ===
+
+1. External job board links (most reliable)
+2. Career subdomains (jobs.company.com, bmwgroup.jobs)
+3. Sitemap URLs matching career patterns  
+4. Internal /jobs or /careers from HTML
+
+=== OUTPUT ===
+
+Return ONLY the URL (full https://... URL).
+
+If nothing found: NOT_FOUND
 """
 
 EXTRACT_JOBS_PROMPT = """Extract job listings from this careers page HTML.
@@ -106,6 +134,44 @@ You analyze HTML content and extract structured information accurately.
 Always respond with precise, structured data in the requested format.
 """
 
+FIND_JOB_BOARD_PROMPT = """Find the external job board URL from these links.
+
+Current page: {url}
+
+Links found on page (URL [link text]):
+{html}
+
+=== YOUR TASK ===
+
+Find the link that leads to ACTUAL job listings.
+
+=== WHAT TO LOOK FOR ===
+
+1. **External job board domains** (HIGHEST PRIORITY):
+   - *.jobs domains (bmwgroup.jobs, volkswagengroup.jobs, siemens.jobs)
+   - greenhouse.io, lever.co, workday.com, successfactors.com, personio.de
+   - jobs.company.com, karriere.company.com
+
+2. **Link text containing**:
+   - "Jobs", "Careers", "Karriere", "Stellenangebote", "Open positions"
+   - "Alle Stellen", "Offene Stellen", "Jetzt bewerben"
+
+3. **URL patterns**:
+   - /jobs, /careers, /stellenangebote, /positions
+
+=== PRIORITY ===
+
+1. External *.jobs domains (e.g., bmwgroup.jobs) - BEST
+2. External job platforms (greenhouse, lever, etc.)
+3. Subdomain portals (jobs.company.com)
+4. Internal job listing pages
+
+=== OUTPUT ===
+
+Return ONLY the full URL (https://...).
+If no job board link found, return: NOT_FOUND
+"""
+
 TRANSLATE_JOB_TITLES_PROMPT = """Translate the following job titles to English.
 
 Job titles (one per line):
@@ -146,4 +212,56 @@ Important:
 - Look for pages that would list ALL job openings
 
 Return ONLY the URL, nothing else. If you can't find it, return "NOT_FOUND".
+"""
+
+FIND_JOB_URLS_PROMPT = """Analyze this HTML and find ALL links to individual job postings.
+
+URL: {url}
+
+HTML:
+{html}
+
+TASK: Extract URLs that lead to INDIVIDUAL JOB PAGES (job details, not listing pages).
+
+=== HOW TO IDENTIFY JOB URLS ===
+
+Job URLs typically:
+- Point to a specific position (e.g., /jobs/senior-developer, /career/software-engineer-123)
+- Have unique identifiers (IDs, slugs) in the path
+- Are links on job titles in listings
+- Hosted on job platforms (greenhouse.io, lever.co, personio.de, workday.com, etc.)
+
+NOT job URLs:
+- Category/department pages (/jobs/engineering, /karriere/it)
+- Listing pages (/jobs, /careers, /vacancies)
+- Social links, privacy policy, about pages
+- Company info pages
+
+=== WHAT TO LOOK FOR ===
+
+1. Find <a> tags where:
+   - href contains job-related paths (/job/, /jobs/, /position/, /vacancy/, /stelle/)
+   - AND the href has an identifier (ID, slug) after the path
+   
+2. Common patterns:
+   - /jobs/[slug] or /job/[id]
+   - /careers/[department]/[slug]
+   - /position/[id]
+   - ?gh_jid=123 (Greenhouse)
+   - /postings/[id] (Lever)
+
+=== OUTPUT FORMAT ===
+
+Return ONLY a JSON array of job URLs:
+```json
+["https://example.com/jobs/senior-dev", "https://example.com/jobs/pm-123"]
+```
+
+RULES:
+1. Return FULL URLs (https://domain/path)
+2. Only individual job pages, NOT listings
+3. Deduplicate - no repeated URLs
+4. If no job URLs found, return empty array: []
+
+JSON:
 """

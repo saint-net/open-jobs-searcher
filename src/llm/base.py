@@ -29,32 +29,154 @@ class BaseLLMProvider(ABC):
         """
         pass
 
-    async def find_careers_url(self, html: str, base_url: str) -> Optional[str]:
+    async def find_careers_url(
+        self, html: str, base_url: str, sitemap_urls: list[str] = None
+    ) -> Optional[str]:
         """
         Найти ссылку на страницу с вакансиями.
 
         Args:
             html: HTML содержимое главной страницы
             base_url: Базовый URL сайта
+            sitemap_urls: Список URL из sitemap.xml (опционально)
 
         Returns:
             URL страницы с вакансиями или None
         """
         from .prompts import FIND_CAREERS_PAGE_PROMPT
 
-        # Ограничиваем размер HTML для LLM
-        html_truncated = html[:15000] if len(html) > 15000 else html
+        # Очищаем HTML
+        clean_html = self._clean_html(html)
+        html_truncated = clean_html[:40000] if len(clean_html) > 40000 else clean_html
+        
+        # Форматируем sitemap URLs
+        sitemap_text = "No sitemap available"
+        if sitemap_urls:
+            # Фильтруем только потенциально релевантные URL
+            relevant_keywords = ['career', 'job', 'karriere', 'stellen', 'vacanc', 'hiring', 'join', 'work']
+            relevant_urls = [
+                url for url in sitemap_urls 
+                if any(kw in url.lower() for kw in relevant_keywords)
+            ]
+            
+            # Всегда показываем релевантные URL первыми
+            # Если их мало - добавляем случайные из остальных
+            if relevant_urls:
+                urls_to_show = relevant_urls[:50]
+                logger.debug(f"Found {len(relevant_urls)} career-related URLs in sitemap")
+            else:
+                urls_to_show = sitemap_urls[:100]
+            
+            sitemap_text = "\n".join(urls_to_show)
+        
+        logger.debug(
+            f"Searching for careers URL: {len(html_truncated)} chars HTML + "
+            f"{len(sitemap_urls or [])} sitemap URLs"
+        )
 
         prompt = FIND_CAREERS_PAGE_PROMPT.format(
             base_url=base_url,
             html=html_truncated,
+            sitemap_urls=sitemap_text,
         )
 
         response = await self.complete(prompt)
         
         # Извлекаем URL из ответа
         url = self._extract_url(response, base_url)
+        
+        if url and url != "NOT_FOUND":
+            logger.debug(f"LLM found careers URL: {url}")
+        else:
+            logger.debug("LLM did not find careers URL")
+            
         return url
+
+    async def find_job_board_url(self, html: str, url: str) -> Optional[str]:
+        """
+        Найти ссылку на job board на странице карьеры.
+        
+        Многие компании имеют landing page про работу, а реальные вакансии
+        на внешнем job board (greenhouse, lever, bmwgroup.jobs и т.д.)
+
+        Args:
+            html: HTML содержимое страницы карьеры
+            url: URL текущей страницы
+
+        Returns:
+            URL job board или None если не найден / текущая страница и есть job board
+        """
+        from .prompts import FIND_JOB_BOARD_PROMPT
+        from urllib.parse import urljoin
+        
+        # Извлекаем только ссылки из HTML (более эффективно чем передавать весь HTML)
+        links = self._extract_links_from_html(html, url)
+        
+        if not links:
+            logger.debug("No links found in HTML")
+            return None
+        
+        # Формируем компактный список ссылок для LLM
+        links_text = "\n".join(links[:200])  # Max 200 links
+        
+        logger.debug(f"Searching for job board URL among {len(links)} links on {url}")
+
+        prompt = FIND_JOB_BOARD_PROMPT.format(
+            url=url,
+            html=links_text,
+        )
+
+        response = await self.complete(prompt)
+        
+        # Обработка ответа
+        response_clean = response.strip()
+        
+        if "CURRENT_PAGE" in response_clean:
+            logger.debug("Current page is the job board")
+            return None  # Текущая страница уже содержит вакансии
+        
+        if "NOT_FOUND" in response_clean:
+            logger.debug("No job board URL found")
+            return None
+        
+        # Извлекаем URL из ответа
+        job_board_url = self._extract_url(response, url)
+        
+        if job_board_url and job_board_url != url:
+            logger.debug(f"Found job board URL: {job_board_url}")
+            return job_board_url
+        
+        return None
+
+    def _extract_links_from_html(self, html: str, base_url: str) -> list[str]:
+        """Извлечь все ссылки из HTML."""
+        from bs4 import BeautifulSoup
+        from urllib.parse import urljoin
+        
+        soup = BeautifulSoup(html, 'lxml')
+        links = []
+        seen = set()
+        
+        for a in soup.find_all('a', href=True):
+            href = a.get('href', '').strip()
+            if not href or href.startswith('#') or href.startswith('javascript:'):
+                continue
+            
+            # Конвертируем в абсолютный URL
+            full_url = urljoin(base_url, href)
+            
+            # Дедупликация
+            if full_url not in seen:
+                seen.add(full_url)
+                
+                # Добавляем с текстом ссылки для контекста
+                link_text = a.get_text(strip=True)[:50]  # Max 50 chars
+                if link_text:
+                    links.append(f"{full_url} [{link_text}]")
+                else:
+                    links.append(full_url)
+        
+        return links
 
     async def find_careers_url_from_sitemap(self, urls: list[str], base_url: str) -> Optional[str]:
         """
@@ -83,6 +205,67 @@ class BaseLLMProvider(ABC):
         # Извлекаем URL из ответа
         url = self._extract_url(response, base_url)
         return url
+
+    async def find_job_urls(self, html: str, url: str) -> list[str]:
+        """
+        Найти URL'ы отдельных вакансий на странице карьеры с помощью LLM.
+        
+        Этот метод полезен когда:
+        - Страница карьеры загружается через JS (SPA)
+        - Schema.org отсутствует
+        - Нужен список ссылок для дальнейшего парсинга каждой вакансии
+
+        Args:
+            html: HTML содержимое страницы карьеры
+            url: URL страницы
+
+        Returns:
+            Список URL'ов отдельных вакансий
+        """
+        from .prompts import FIND_JOB_URLS_PROMPT
+        from urllib.parse import urljoin
+
+        # Очищаем и ограничиваем HTML
+        clean_html = self._clean_html(html)
+        html_truncated = clean_html[:80000] if len(clean_html) > 80000 else clean_html
+
+        prompt = FIND_JOB_URLS_PROMPT.format(
+            url=url,
+            html=html_truncated,
+        )
+
+        response = await self.complete(prompt)
+        
+        # Извлекаем JSON массив URL'ов
+        result = self._extract_json(response)
+        
+        if not isinstance(result, list):
+            logger.warning(f"LLM returned non-list for job URLs: {type(result)}")
+            return []
+        
+        # Валидируем и нормализуем URL'ы
+        valid_urls = []
+        seen = set()
+        
+        for item in result:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            
+            job_url = item.strip()
+            
+            # Конвертируем относительные URL в абсолютные
+            if job_url.startswith('/'):
+                job_url = urljoin(url, job_url)
+            elif not job_url.startswith(('http://', 'https://')):
+                job_url = urljoin(url, job_url)
+            
+            # Дедупликация
+            if job_url not in seen:
+                seen.add(job_url)
+                valid_urls.append(job_url)
+        
+        logger.debug(f"LLM found {len(valid_urls)} unique job URLs on {url}")
+        return valid_urls
 
     async def translate_job_titles(self, titles: list[str]) -> list[str]:
         """

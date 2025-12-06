@@ -632,6 +632,104 @@ def _display_sync_result(sync_result) -> None:
     console.print()
 
 
+@app.command("find-job-urls")
+def find_job_urls(
+    url: str = typer.Argument(
+        ...,
+        help="URL страницы карьеры с вакансиями",
+    ),
+    provider: str = typer.Option(
+        "openrouter",
+        "--provider",
+        "-p",
+        help="LLM провайдер (openrouter, ollama)",
+    ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Модель LLM",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Показать отладочную информацию",
+    ),
+):
+    """🔗 Найти URL'ы отдельных вакансий на странице через LLM."""
+    start_time = time.perf_counter()
+    
+    # Enable debug logging if verbose
+    if verbose:
+        logging.getLogger("src").setLevel(logging.DEBUG)
+    
+    display_model = model
+    if display_model is None:
+        display_model = "gpt-oss:20b" if provider == "ollama" else "openai/gpt-oss-120b"
+    
+    console.print(f"[bold blue]🌐 Страница:[/bold blue] {url}")
+    console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({display_model})")
+    console.print()
+
+    job_urls = asyncio.run(_find_job_urls(url, provider, model))
+    
+    if job_urls:
+        console.print(f"[green]✓[/green] Найдено {len(job_urls)} URL'ов вакансий:")
+        console.print()
+        for i, job_url in enumerate(job_urls, 1):
+            console.print(f"  {i}. {job_url}")
+    else:
+        console.print("[yellow]⚠[/yellow] URL'ы вакансий не найдены")
+    
+    display_execution_time(time.perf_counter() - start_time)
+
+
+async def _find_job_urls(url: str, provider: str, model: Optional[str]) -> list[str]:
+    """Асинхронный поиск URL'ов вакансий через LLM."""
+    from src.browser import BrowserLoader
+    
+    # Определяем модель по умолчанию
+    if model is None:
+        if provider == "ollama":
+            model = "gpt-oss:20b"
+        else:
+            model = "openai/gpt-oss-120b"
+    
+    try:
+        llm = get_llm_provider(provider, model=model)
+    except Exception as e:
+        console.print(f"[red]✗[/red] Ошибка инициализации LLM: {e}")
+        return []
+    
+    # Загружаем страницу через браузер (для SPA сайтов)
+    async with llm:
+        try:
+            loader = BrowserLoader(headless=True)
+            await loader.start()
+            
+            with console.status("[bold green]Загружаю страницу..."):
+                html = await loader.fetch(url)
+            
+            await loader.stop()
+            
+            if not html:
+                console.print("[red]✗[/red] Не удалось загрузить страницу")
+                return []
+            
+            with console.status("[bold green]Анализирую страницу через LLM..."):
+                job_urls = await llm.find_job_urls(html, url)
+            
+            return job_urls
+            
+        except PlaywrightBrowsersNotInstalledError as e:
+            console.print(f"[red]✗[/red] {e}")
+            return []
+        except Exception as e:
+            console.print(f"[red]✗[/red] Ошибка: {e}")
+            return []
+
+
 if __name__ == "__main__":
     app()
 
