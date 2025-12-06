@@ -48,6 +48,7 @@ class OpenRouterProvider(BaseLLMProvider):
         "capacity",
         "temporarily unavailable",
         "service unavailable",
+        "internal server error",  # 500 errors
         "502", "503", "504",  # Gateway errors
     ]
     
@@ -175,22 +176,35 @@ class OpenRouterProvider(BaseLLMProvider):
                 
                 # Проверяем на ошибки в ответе
                 if data.get("error"):
-                    error_msg = data["error"].get("message", "Unknown error")
+                    error_data = data["error"]
+                    error_msg = error_data.get("message", "Unknown error")
+                    error_code = error_data.get("code", "")
+                    error_type = error_data.get("type", "")
+                    
+                    # Формируем детализированное сообщение
+                    full_error = error_msg
+                    if error_code:
+                        full_error = f"[{error_code}] {full_error}"
+                    if error_type:
+                        full_error = f"{full_error} (type: {error_type})"
+                    
+                    # Log full error details for debugging
+                    logger.debug(f"OpenRouter error response: {error_data}")
                     
                     # Check if this is a transient error that we should retry
                     if self._is_transient_error(error_msg) and attempt < self.MAX_RETRIES - 1:
                         delay = self.INITIAL_RETRY_DELAY * (2 ** attempt)
                         retry_msg = (
-                            f"OpenRouter transient error (attempt {attempt + 1}/{self.MAX_RETRIES}): {error_msg}. "
+                            f"OpenRouter transient error (attempt {attempt + 1}/{self.MAX_RETRIES}): {full_error}. "
                             f"Retrying in {delay:.1f}s..."
                         )
                         logger.warning(retry_msg)
                         console.print(f"[bold red]⚠️  {retry_msg}[/bold red]")
                         await asyncio.sleep(delay)
-                        last_error = RuntimeError(f"OpenRouter API error: {error_msg}")
+                        last_error = RuntimeError(f"OpenRouter API error: {full_error}")
                         continue
                     
-                    raise RuntimeError(f"OpenRouter API error: {error_msg}")
+                    raise RuntimeError(f"OpenRouter API error: {full_error}")
                 
                 # Извлекаем ответ
                 choices = data.get("choices", [])
@@ -201,8 +215,9 @@ class OpenRouterProvider(BaseLLMProvider):
                 return ""
                 
             except httpx.HTTPStatusError as e:
-                error_body = e.response.text
-                error_msg = f"{e.response.status_code} - {error_body}"
+                error_body = e.response.text[:500]  # Limit body length
+                error_msg = f"HTTP {e.response.status_code}: {error_body}"
+                logger.debug(f"OpenRouter HTTP error: status={e.response.status_code}, body={error_body}")
                 
                 # Retry on 5xx errors
                 if e.response.status_code >= 500 and attempt < self.MAX_RETRIES - 1:

@@ -5,6 +5,8 @@ import re
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
+from rich.console import Console
+
 from src.models import Job
 from src.searchers.base import BaseSearcher
 from src.searchers.http_client import AsyncHttpClient
@@ -20,6 +22,7 @@ from src.database import JobRepository
 from src.database.models import SyncResult
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 
 class WebsiteSearcher(BaseSearcher):
@@ -777,7 +780,9 @@ class WebsiteSearcher(BaseSearcher):
             return jobs_data, next_page_url
             
         except Exception as e:
-            logger.warning(f"Error extracting jobs from {careers_url}: {e}")
+            error_msg = f"Error extracting jobs from {careers_url}: {e}"
+            logger.warning(error_msg)
+            console.print(f"[bold red]❌ {error_msg}[/bold red]")
             return [], None
         finally:
             # Clean up page and context
