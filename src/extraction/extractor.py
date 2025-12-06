@@ -1,213 +1,123 @@
-"""Hybrid job extractor combining multiple strategies."""
+"""Simplified job extractor: Schema.org + LLM.
+
+Strategy:
+1. Try Schema.org structured data first (100% accuracy when available)
+2. If no Schema.org data, use LLM extraction (main method)
+
+This approach eliminates false positives from heuristic-based strategies
+(AccessibilityTree, KeywordMatch, ListStructure, GenderNotation).
+"""
 
 import logging
-from typing import Optional, Callable, Awaitable
+from typing import Optional, Callable, Awaitable, Any
 
 from .candidate import JobCandidate, ExtractionSource
-from .strategies import (
-    BaseExtractionStrategy,
-    SchemaOrgStrategy,
-    GenderNotationStrategy,
-    ListStructureStrategy,
-    KeywordMatchStrategy,
-)
+from .strategies import SchemaOrgStrategy
 
 logger = logging.getLogger(__name__)
 
 
 class HybridJobExtractor:
     """
-    Hybrid job extractor that combines multiple extraction strategies.
+    Simplified job extractor: Schema.org + LLM.
     
-    Strategies are applied in order of reliability:
-    1. Schema.org structured data (highest confidence)
-    2. Gender notation patterns (m/w/d, etc.)
-    3. List structure detection
-    4. Keyword matching (lowest confidence)
+    1. Schema.org structured data (100% accuracy, ~20-30% of sites)
+    2. LLM extraction (main method for everything else)
     
-    Results are merged and deduplicated, with higher confidence
-    candidates taking precedence.
+    This eliminates false positives from heuristic strategies.
     """
-    
-    # Minimum confidence threshold to include a candidate
-    MIN_CONFIDENCE = 0.4
-    
-    # Minimum number of candidates before using LLM fallback
-    MIN_CANDIDATES_FOR_LLM_SKIP = 3
-    
-    # Confidence threshold below which we should also try LLM
-    LLM_FALLBACK_CONFIDENCE = 0.6
     
     def __init__(
         self,
         llm_extract_fn: Optional[Callable[[str, str], Awaitable[list[dict]]]] = None,
     ):
         """
-        Initialize hybrid extractor.
+        Initialize extractor.
         
         Args:
-            llm_extract_fn: Optional LLM extraction function for fallback.
+            llm_extract_fn: LLM extraction function.
                            Should accept (html, url) and return list of job dicts.
         """
         self.llm_extract_fn = llm_extract_fn
         
-        # Initialize strategies in order of reliability
-        self.strategies: list[BaseExtractionStrategy] = [
-            SchemaOrgStrategy(),
-            GenderNotationStrategy(),
-            ListStructureStrategy(),
-            KeywordMatchStrategy(),
-        ]
+        # Schema.org is the only heuristic strategy (100% accuracy)
+        self.schema_strategy = SchemaOrgStrategy()
     
-    async def extract(self, html: str, url: str) -> list[dict]:
+    async def extract(self, html: str, url: str, page: Any = None) -> list[dict]:
         """
-        Extract jobs using hybrid approach.
+        Extract jobs: Schema.org first, then LLM.
         
         Args:
             html: HTML content of the careers page
             url: URL of the page
+            page: Optional Playwright Page object (not used in simplified version)
             
         Returns:
             List of job dictionaries with title, url, location, etc.
         """
-        all_candidates: list[JobCandidate] = []
+        # 1. Try Schema.org first (100% accuracy when available)
+        try:
+            schema_candidates = self.schema_strategy.extract(html, url)
+            if schema_candidates:
+                logger.debug(f"Schema.org found {len(schema_candidates)} jobs, using these")
+                return self._finalize(schema_candidates)
+            logger.debug("Schema.org found 0 jobs, falling back to LLM")
+        except Exception as e:
+            logger.warning(f"SchemaOrgStrategy failed: {e}")
         
-        # Apply each strategy
-        for strategy in self.strategies:
-            try:
-                candidates = strategy.extract(html, url)
-                all_candidates.extend(candidates)
-                
-                # If schema.org found enough jobs, we can skip others
-                if strategy.name == "schema_org" and len(candidates) >= 3:
-                    logger.debug(f"Schema.org found {len(candidates)} jobs, using these")
-                    return self._finalize(candidates)
-                    
-            except Exception as e:
-                logger.warning(f"Strategy {strategy.name} failed: {e}")
-                continue
+        # 2. No Schema.org data -> use LLM as main extraction method
+        llm_jobs = await self._llm_extract(html, url)
+        if llm_jobs:
+            llm_candidates = self._convert_llm_jobs(llm_jobs)
+            return self._finalize(llm_candidates)
         
-        # Merge and deduplicate candidates
-        merged = self._merge_candidates(all_candidates)
-        
-        # Filter by confidence
-        confident = [c for c in merged if c.confidence >= self.MIN_CONFIDENCE]
-        
-        logger.debug(
-            f"Hybrid extraction: {len(all_candidates)} raw -> "
-            f"{len(merged)} merged -> {len(confident)} confident"
-        )
-        
-        # Decide if we need LLM fallback
-        if self._should_use_llm_fallback(confident):
-            llm_jobs = await self._llm_fallback(html, url)
-            if llm_jobs:
-                # Merge LLM results with existing
-                merged = self._merge_with_llm_results(confident, llm_jobs)
-                confident = merged
-        
-        return self._finalize(confident)
+        # No jobs found
+        logger.debug("No jobs found via Schema.org or LLM")
+        return []
     
-    def _merge_candidates(self, candidates: list[JobCandidate]) -> list[JobCandidate]:
-        """
-        Merge candidates from different strategies, keeping highest confidence.
-        """
-        # Group by normalized title
-        by_title: dict[str, list[JobCandidate]] = {}
-        
-        for candidate in candidates:
-            # Skip empty or whitespace-only titles
-            if not candidate.title or not candidate.title.strip():
-                continue
-            key = candidate.normalized_title
-            if not key:
-                continue
-            if key not in by_title:
-                by_title[key] = []
-            by_title[key].append(candidate)
-        
-        # For each group, keep the one with highest confidence
-        merged = []
-        for title, group in by_title.items():
-            # Sort by confidence (descending)
-            group.sort(key=lambda c: c.confidence, reverse=True)
-            best = group[0]
-            
-            # If best doesn't have URL but another does, use that URL
-            if best.url == "" or best.url.endswith('/'):
-                for other in group[1:]:
-                    if other.url and not other.url.endswith('/'):
-                        best.url = other.url
-                        best.signals["has_job_url"] = True
-                        break
-            
-            merged.append(best)
-        
-        return merged
+    # Keep for backward compatibility
+    async def extract_with_browser(self, html: str, url: str, page: Any) -> list[dict]:
+        """Extract jobs (browser page not used in simplified version)."""
+        return await self.extract(html, url, page)
     
-    def _should_use_llm_fallback(self, candidates: list[JobCandidate]) -> bool:
-        """Decide if we should use LLM fallback."""
+    async def _llm_extract(self, html: str, url: str) -> list[dict]:
+        """Use LLM to extract jobs."""
         if not self.llm_extract_fn:
-            return False
-        
-        # Too few candidates
-        if len(candidates) < self.MIN_CANDIDATES_FOR_LLM_SKIP:
-            logger.debug(f"Only {len(candidates)} candidates, will try LLM")
-            return True
-        
-        # Low average confidence
-        if candidates:
-            avg_confidence = sum(c.confidence for c in candidates) / len(candidates)
-            if avg_confidence < self.LLM_FALLBACK_CONFIDENCE:
-                logger.debug(f"Low confidence ({avg_confidence:.2f}), will try LLM")
-                return True
-        
-        return False
-    
-    async def _llm_fallback(self, html: str, url: str) -> list[dict]:
-        """Use LLM to extract jobs as fallback."""
-        if not self.llm_extract_fn:
+            logger.warning("No LLM extraction function provided")
             return []
         
         try:
-            logger.debug("Using LLM fallback for job extraction")
+            logger.debug("Using LLM for job extraction")
             return await self.llm_extract_fn(html, url)
         except Exception as e:
-            logger.warning(f"LLM fallback failed: {e}")
+            logger.warning(f"LLM extraction failed: {e}")
             return []
     
-    def _merge_with_llm_results(
-        self,
-        candidates: list[JobCandidate],
-        llm_jobs: list[dict]
-    ) -> list[JobCandidate]:
-        """Merge existing candidates with LLM results."""
-        # Convert LLM jobs to candidates
-        llm_candidates = []
+    def _convert_llm_jobs(self, llm_jobs: list[dict]) -> list[JobCandidate]:
+        """Convert LLM job dicts to JobCandidate objects."""
+        candidates = []
+        seen_titles = set()
+        
         for job in llm_jobs:
             title = job.get("title", "")
-            if not title:
+            if not title or not title.strip():
                 continue
             
-            llm_candidates.append(JobCandidate(
+            candidate = JobCandidate(
                 title=title,
                 url=job.get("url", ""),
                 location=job.get("location", "Unknown"),
                 department=job.get("department"),
                 source=ExtractionSource.LLM,
                 signals={"from_llm": True},
-            ))
+            )
+            
+            # Deduplicate by normalized title
+            if candidate.normalized_title not in seen_titles:
+                candidates.append(candidate)
+                seen_titles.add(candidate.normalized_title)
         
-        # Existing titles (normalized)
-        existing_titles = {c.normalized_title for c in candidates}
-        
-        # Add LLM candidates that aren't already present
-        for llm_candidate in llm_candidates:
-            if llm_candidate.normalized_title not in existing_titles:
-                candidates.append(llm_candidate)
-                existing_titles.add(llm_candidate.normalized_title)
-        
-        logger.debug(f"Added {len(llm_candidates)} LLM candidates, total: {len(candidates)}")
+        logger.debug(f"LLM extracted {len(candidates)} unique jobs")
         return candidates
     
     def _finalize(self, candidates: list[JobCandidate]) -> list[dict]:
@@ -216,25 +126,18 @@ class HybridJobExtractor:
     
     def extract_sync(self, html: str, url: str) -> list[dict]:
         """
-        Synchronous extraction (without LLM fallback).
+        Synchronous extraction (Schema.org only, no LLM).
         
-        Use this when you don't need async or want to skip LLM.
+        Use this when you don't have async context.
+        Note: This only extracts Schema.org data, no LLM fallback.
         """
-        all_candidates: list[JobCandidate] = []
+        try:
+            schema_candidates = self.schema_strategy.extract(html, url)
+            if schema_candidates:
+                logger.debug(f"Schema.org found {len(schema_candidates)} jobs")
+                return self._finalize(schema_candidates)
+        except Exception as e:
+            logger.warning(f"SchemaOrgStrategy failed: {e}")
         
-        for strategy in self.strategies:
-            try:
-                candidates = strategy.extract(html, url)
-                all_candidates.extend(candidates)
-                
-                if strategy.name == "schema_org" and len(candidates) >= 3:
-                    return self._finalize(candidates)
-                    
-            except Exception as e:
-                logger.warning(f"Strategy {strategy.name} failed: {e}")
-                continue
-        
-        merged = self._merge_candidates(all_candidates)
-        confident = [c for c in merged if c.confidence >= self.MIN_CONFIDENCE]
-        
-        return self._finalize(confident)
+        logger.debug("No Schema.org data found (use async extract() for LLM)")
+        return []

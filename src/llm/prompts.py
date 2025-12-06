@@ -30,33 +30,46 @@ URL: {url}
 HTML:
 {html}
 
-TASK: Find ALL job postings and extract them as JSON.
+TASK: Find ALL SPECIFIC job postings and extract them as JSON.
 
-IMPORTANT: This page may have just 1-2 jobs or many jobs. Extract ALL of them, even if there's only ONE job posting!
+CRITICAL - What IS a job posting:
+- SPECIFIC position titles: "Senior Software Developer (m/w/d)", "Sales Manager - EMEA", "Marketing Specialist"
+- Contains role specifics: level (Junior/Senior), specialization, department
+- Usually has: title + location + link to apply/details
+- Examples of REAL job postings:
+  * "Werkstudent Sales (m/w/d)" - specific role with gender notation
+  * "Senior Backend Developer" - specific position
+  * "Customer Success Manager - DACH Region" - role with region
+
+CRITICAL - What is NOT a job posting (DO NOT EXTRACT):
+- Standalone categories WITHOUT any job details: just text like "Sales", "Engineering" as menu items
+- DEPARTMENT NAMES without context: "IT Department", "Human Resources" as section headers only
+- AREAS OF WORK as promotional text: "We're hiring in Sales", "Join our Engineering team"
+- Pages that ONLY say "Send resume to jobs@company.com" with NO position listings at all
+
+IMPORTANT: Generic names CAN be real jobs if they have context:
+- "Technical Support" with experience requirements (e.g. "0-6 years") = REAL JOB
+- "Programming" in expandable card with job details = REAL JOB
+- "Sales" with location (e.g. "Bangalore") = REAL JOB
+- If position has ANY details (experience, location, description) = extract it!
 
 Where to look for job titles:
-- <li> list items containing job names (very common!)
+- <li> list items containing SPECIFIC job names
 - <a> links with job titles in text
-- Headings (h1, h2, h3, h4) with position names
+- Headings (h1, h2, h3, h4) with SPECIFIC position names
 - Cards, divs with job information
 - Text near "Stellen ausgeschrieben" or "open positions"
 
-How to recognize a job title:
+How to recognize a SPECIFIC job title:
 - Contains "(m/w/d)" or "(m/f/d)" - DEFINITELY a job title!
-- Contains "WerkstudentIn", "PraktikantIn", "Manager", "Developer", "Engineer", etc.
-- German titles: "Werkstudent", "Praktikant", "Mitarbeiter", "Leiter", etc.
-- Located in list (<ul>/<li>) under text like "Aktuell haben wir folgende Stellen"
-
-Common HTML patterns:
-- <li>Werkstudent Sales (m/w/d)</li>
-- <a href="/karriere/werkstudent-sales">Werkstudent Sales (m/w/d)</a>
-- <h3>Software Developer (m/w/d)</h3>
-- Text containing "(m/w/d)" is ALWAYS a job posting
+- Has role specifics: "Software Developer", "Sales Manager", "Support Engineer"
+- German titles: "Werkstudent Marketing", "Praktikant Entwicklung", "Mitarbeiter Vertrieb"
+- More than just one word category
 
 For EACH job found, extract:
-- title: The job title exactly as written
+- title: The EXACT job title as written on the page (DO NOT invent or modify!)
 - location: City/region or "Remote" or "Unknown"  
-- url: Full URL to job details (combine base URL with href if relative), or page URL if no specific link
+- url: Full URL to job details, or page URL if no specific link
 - department: Department if mentioned, otherwise null
 
 OUTPUT FORMAT - Return ONLY a JSON array:
@@ -67,11 +80,13 @@ OUTPUT FORMAT - Return ONLY a JSON array:
 ```
 
 RULES:
-1. Extract EVERY job - even if there's only 1 job on the page!
-2. Anything with "(m/w/d)" or "(m/f/d)" is a job - extract it!
-3. Return valid JSON only, no extra text
-4. Empty array [] ONLY if absolutely NO jobs exist
-5. Use full URLs (include https://domain)
+1. Extract job positions - even generic names if they have details (experience, location)!
+2. DO NOT invent job titles - use EXACT text from the page!
+3. If position has context (experience, location, description) = it's a real job
+4. Anything with "(m/w/d)" or "(m/f/d)" is a job - extract it!
+5. Return valid JSON only, no extra text
+6. Empty array [] ONLY if page has NO job listings at all (just "email us")
+7. Use full URLs (include https://domain)
 
 JSON:
 """

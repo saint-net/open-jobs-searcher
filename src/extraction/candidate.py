@@ -9,6 +9,7 @@ import re
 class ExtractionSource(Enum):
     """Source of job extraction."""
     SCHEMA_ORG = "schema_org"          # schema.org/JobPosting - highest confidence
+    ACCESSIBILITY = "accessibility"     # Browser accessibility tree - high confidence
     GENDER_NOTATION = "gender_notation" # (m/w/d) pattern
     LIST_STRUCTURE = "list_structure"   # Detected from repeated HTML structure
     KEYWORD_MATCH = "keyword_match"     # Job title keywords
@@ -18,6 +19,7 @@ class ExtractionSource(Enum):
 # Base confidence scores by source
 SOURCE_CONFIDENCE = {
     ExtractionSource.SCHEMA_ORG: 0.95,
+    ExtractionSource.ACCESSIBILITY: 0.90,  # High confidence - clean text from browser
     ExtractionSource.GENDER_NOTATION: 0.85,
     ExtractionSource.LIST_STRUCTURE: 0.60,
     ExtractionSource.KEYWORD_MATCH: 0.50,
@@ -88,14 +90,111 @@ class JobCandidate:
             "company": self.company,
         }
     
+    def _fix_concatenated_title(self, title: str) -> str:
+        """
+        Fix concatenated/repeated titles.
+        
+        Examples:
+            "Full-Stack Engineer (f/d/m)Full-Stack Engineer (f/d/m)" -> "Full-Stack Engineer (f/d/m)"
+            "Frontend Engineer\nFrontend Engineer" -> "Frontend Engineer"
+        """
+        if not title or len(title) < 10:
+            return title
+        
+        # First check for newline-separated duplicates (from innerText)
+        lines = [line.strip() for line in title.split('\n') if line.strip()]
+        if len(lines) >= 2:
+            # Remove duplicate lines, keep order
+            unique_lines = list(dict.fromkeys(lines))
+            if len(unique_lines) < len(lines):
+                # Had duplicates - join unique lines
+                return ' '.join(unique_lines)
+            # Check if first and second lines are the same (normalized)
+            first_norm = re.sub(r'\s+', ' ', lines[0].lower())
+            second_norm = re.sub(r'\s+', ' ', lines[1].lower())
+            if first_norm == second_norm:
+                return lines[0]
+        
+        # Then check for directly concatenated duplicates
+        title_len = len(title)
+        for half_len in range(title_len // 4, title_len // 2 + 1):
+            first_part = title[:half_len]
+            rest = title[half_len:]
+            
+            if rest == first_part or rest.lstrip() == first_part:
+                return first_part.strip()
+            
+            first_normalized = re.sub(r'\s+', ' ', first_part.strip().lower())
+            rest_normalized = re.sub(r'\s+', ' ', rest.strip().lower())
+            
+            if first_normalized == rest_normalized and first_normalized:
+                return first_part.strip()
+        
+        return title
+    
     @property
     def normalized_title(self) -> str:
         """Get normalized title for comparison (keeps location for uniqueness)."""
         if not self.title:
             return ""
+        
+        # First, detect and fix concatenated/repeated titles
+        # e.g., "Full-Stack Engineer (f/d/m)Full-Stack Engineer (f/d/m)" -> "Full-Stack Engineer (f/d/m)"
+        title = self._fix_concatenated_title(self.title)
+        
         # Remove gender notation and normalize whitespace
         # BUT keep location suffix - different locations = different jobs
-        normalized = re.sub(r'\s*\([mwfdx/]+\)\s*', '', self.title.lower())
+        # Pattern 1: with parentheses (m/w/d), (f/d/m), etc.
+        normalized = re.sub(r'\s*\([mwfdx/]+\)\s*', '', title.lower())
+        # Pattern 2: without parentheses at end of title: "Senior DeveloperM/W/D" or "Senior Developer m/w/d"
+        normalized = re.sub(r'\s*[mwfdx]/[mwfdx](/[mwfdx])?\s*$', '', normalized, flags=re.IGNORECASE)
+        
+        # Remove salary/employment type suffixes that create duplicates
+        # Pattern: "– Vollzeit: 30.000 - 40.000 Euro Jahresgehalt."
+        # Also handles: "- Vollzeit/Teilzeit: ..."
+        normalized = re.sub(
+            r'\s*[–-]\s*(vollzeit|teilzeit|full-?time|part-?time)[:/]?\s*[\d.,\s-]*(euro|eur|€)?.*$',
+            '',
+            normalized,
+            flags=re.IGNORECASE
+        )
+        
+        # Remove trailing salary info without employment type
+        # Pattern: "30.000 - 40.000 Euro Jahresgehalt" at the end
+        normalized = re.sub(
+            r'\s*[\d.,]+\s*[-–]\s*[\d.,]+\s*(euro|eur|€)\s*(jahresgehalt|annual|salary)?\.?\s*$',
+            '',
+            normalized,
+            flags=re.IGNORECASE
+        )
+        
+        # Remove "in vollzeit/teilzeit" from title
+        normalized = re.sub(r'\s+in\s+(vollzeit|teilzeit)\b', '', normalized)
+        
+        # Remove department/context suffixes like "im Vertrieb"
+        normalized = re.sub(r'\s+(im|in der|in den|für)\s+\w+$', '', normalized)
+        
+        # Normalize German singular/plural forms for common job words
+        # Telefonisten -> Telefonist, Mitarbeiter/Mitarbeiterin -> Mitarbeiter
+        german_singular_map = {
+            r'\btelefonisten\b': 'telefonist',
+            r'\bmitarbeiterin\b': 'mitarbeiter',
+            r'\bmitarbeiterinnen\b': 'mitarbeiter',
+            r'\bassistentin\b': 'assistent',
+            r'\bassistentinnen\b': 'assistent',
+            r'\bberaterinnen\b': 'berater',
+            r'\bberaterin\b': 'berater',
+            r'\bkundenbetreuerin\b': 'kundenbetreuer',
+            r'\bkundenbetreuerinnen\b': 'kundenbetreuer',
+        }
+        for pattern, replacement in german_singular_map.items():
+            normalized = re.sub(pattern, replacement, normalized)
+        
+        # Normalize "Geschäftsführers" -> "Geschäftsführung" (genitive -> base)
+        # "des Geschäftsführers" and "der Geschäftsführung" are same position
+        normalized = re.sub(r'\bdes\s+geschäftsführers\b', 'der geschäftsführung', normalized)
+        normalized = re.sub(r'\bgeschäftsführers\b', 'geschäftsführung', normalized)
+        
         normalized = re.sub(r'\s+', ' ', normalized).strip()
         return normalized
     

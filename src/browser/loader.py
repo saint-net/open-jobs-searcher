@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from playwright.async_api import async_playwright, Browser, Page, Playwright
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
 
 from .exceptions import DomainUnreachableError, PlaywrightBrowsersNotInstalledError
 from .patterns import DEFAULT_USER_AGENT, NETWORK_ERROR_PATTERNS
@@ -152,6 +152,120 @@ class BrowserLoader:
                 context = page.context
                 await page.close()
                 await context.close()
+
+    async def fetch_with_page(
+        self, url: str, navigate_to_jobs: bool = False, max_attempts: int = 2
+    ) -> tuple[Optional[str], Optional[str], Optional[Page], Optional["BrowserContext"]]:
+        """
+        Загрузить страницу и вернуть HTML + page объект для дальнейшей работы.
+        
+        ВАЖНО: Вызывающий код должен закрыть page и context после использования!
+        
+        Args:
+            url: URL страницы
+            navigate_to_jobs: Попытаться найти и перейти на страницу вакансий
+            max_attempts: Максимальное количество попыток навигации
+            
+        Returns:
+            Tuple (HTML, финальный URL, Page объект, BrowserContext) или (None, None, None, None)
+        """
+        if self._browser is None:
+            await self.start()
+
+        page: Optional[Page] = None
+        context = None
+        try:
+            context = await self._browser.new_context(ignore_https_errors=True)
+            page = await context.new_page()
+            
+            await page.set_extra_http_headers({
+                "User-Agent": DEFAULT_USER_AGENT
+            })
+
+            response = await page.goto(url, timeout=self.timeout, wait_until="domcontentloaded")
+            
+            if response is None or response.status >= 400:
+                if page:
+                    await page.close()
+                if context:
+                    await context.close()
+                return None, None, None, None
+
+            # Ждём начальный рендеринг
+            await page.wait_for_timeout(2000)
+            
+            # Обрабатываем cookie consent
+            for _ in range(3):
+                if await handle_cookie_consent(page):
+                    await page.wait_for_timeout(1000)
+                    break
+                await page.wait_for_timeout(500)
+            
+            final_url = url
+            
+            # Навигация к вакансиям если нужно
+            if navigate_to_jobs:
+                for attempt in range(max_attempts):
+                    job_link = await find_job_navigation_link(page)
+                    
+                    if job_link:
+                        logger.debug(f"Found job navigation link: {job_link}")
+                        try:
+                            target = await job_link.get_attribute("target")
+                            
+                            if target == "_blank":
+                                async with page.context.expect_page() as new_page_info:
+                                    await job_link.click()
+                                new_page = await new_page_info.value
+                                await new_page.wait_for_load_state("domcontentloaded")
+                                await new_page.wait_for_timeout(2500)
+                                
+                                final_url = new_page.url
+                                
+                                # Закрываем старую страницу, используем новую
+                                await page.close()
+                                page = new_page
+                                
+                                # На новой странице тоже ищем навигацию
+                                new_job_link = await find_job_navigation_link(page)
+                                if new_job_link:
+                                    try:
+                                        await new_job_link.click()
+                                        await page.wait_for_timeout(1500)
+                                        final_url = page.url
+                                    except Exception:
+                                        pass
+                                break
+                            else:
+                                await job_link.click()
+                                await page.wait_for_timeout(2500)
+                                final_url = page.url
+                                
+                                if is_external_job_board(final_url):
+                                    break
+                        except Exception as e:
+                            logger.debug(f"Click failed: {e}")
+                    else:
+                        break
+            
+            html = await page.content()
+            return html, final_url, page, context
+
+        except Exception as e:
+            error_str = str(e)
+            if any(err in error_str for err in NETWORK_ERROR_PATTERNS):
+                if page:
+                    await page.close()
+                if context:
+                    await context.close()
+                raise DomainUnreachableError(f"Домен недоступен: {url}") from e
+            
+            logger.warning(f"Browser error for {url}: {e}")
+            if page:
+                await page.close()
+            if context:
+                await context.close()
+            return None, None, None, None
 
     async def fetch_with_navigation(self, url: str, max_attempts: int = 2) -> tuple[Optional[str], Optional[str]]:
         """

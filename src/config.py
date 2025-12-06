@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # LLM настройки
     llm_provider: str = Field(default="openrouter", description="LLM провайдер")
-    llm_model: str = Field(default="openai/gpt-oss-20b", description="Модель LLM")
+    llm_model: str = Field(default="openai/gpt-oss-120b", description="Модель LLM")
     ollama_url: str = Field(
         default="http://localhost:11434", description="URL Ollama сервера"
     )

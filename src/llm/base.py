@@ -112,13 +112,14 @@ class BaseLLMProvider(ABC):
         logger.warning(f"Translation failed, returning original titles")
         return titles
 
-    async def extract_jobs(self, html: str, url: str) -> list[dict]:
+    async def extract_jobs(self, html: str, url: str, page=None) -> list[dict]:
         """
         Extract job listings from HTML page using hybrid approach.
 
         Args:
             html: HTML content of the careers page
             url: URL of the page
+            page: Optional Playwright Page object (enables accessibility tree extraction)
 
         Returns:
             List of job dictionaries
@@ -130,8 +131,8 @@ class BaseLLMProvider(ABC):
             llm_extract_fn=self._llm_extract_jobs
         )
         
-        # Use hybrid extraction
-        jobs = await extractor.extract(html, url)
+        # Use hybrid extraction (with browser if page is provided)
+        jobs = await extractor.extract(html, url, page=page)
         
         if jobs:
             logger.debug(f"Hybrid extraction found {len(jobs)} jobs from {url}")

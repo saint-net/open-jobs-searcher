@@ -15,6 +15,8 @@
 - `src/searchers/job_boards/` - парсеры для популярных job board платформ
 - `src/llm/` - провайдеры LLM (Ollama, OpenRouter) с единым интерфейсом BaseLLMProvider
 - `src/browser/` - модули для работы с Playwright (загрузка SPA, навигация, cookies)
+- `src/database/` - SQLite кэширование и отслеживание изменений вакансий
+- `src/extraction/` - гибридная экстракция вакансий (Schema.org + LLM)
 - `src/config.py` - настройки через Pydantic Settings
 - `src/models.py` - модели данных (Pydantic)
 - `src/output.py` - форматирование и вывод результатов
@@ -22,24 +24,42 @@
 ### Паттерны проектирования
 - **Strategy Pattern**: BaseSearcher, BaseLLMProvider, BaseJobBoardParser
 - **Factory Pattern**: get_llm_provider(), JobBoardParserRegistry
+- **Repository Pattern**: JobRepository для работы с БД
 - **Context Manager**: все searchers используют async context managers
 - **Retry Pattern**: AsyncHttpClient с автоматическими retry
 
 ### Асинхронность
 - Все HTTP запросы асинхронные (httpx, aiohttp)
 - Браузерные операции через Playwright async API
+- База данных через aiosqlite
 - Используйте asyncio.run() только в точках входа (main.py)
 
 ### Обработка ошибок
 - Используйте кастомные исключения из `src/browser/exceptions.py`
 - Логирование через стандартный logging модуль
 - При ошибках парсинга - возвращайте пустой список, не бросайте исключения
+- Career URLs деактивируются после 3 неудачных попыток
 
 ### LLM интеграция
 - Все LLM провайдеры наследуют BaseLLMProvider
 - Промпты хранятся в `src/llm/prompts.py`
 - Структурированный вывод через JSON schema
 - Обработка rate limits и retry логика в провайдерах
+- Дефолтная модель: openai/gpt-oss-120b (OpenRouter)
+
+### Гибридная экстракция
+- `HybridJobExtractor` использует Schema.org + LLM
+- Schema.org - 100% точность, ~20-30% сайтов
+- LLM - основной метод для остальных сайтов
+- Избегайте эвристических стратегий с ложными срабатываниями
+- `JobCandidate` с системой scoring для оценки уверенности
+
+### База данных (SQLite)
+- `JobRepository` для всех CRUD операций
+- Таблицы: sites, career_urls, jobs, job_history
+- `sync_jobs()` - синхронизация с отслеживанием изменений
+- История: added, removed, reactivated события
+- Путь: `data/jobs.db` (или через JOBS_DB_PATH env)
 
 ### Job Board парсинг
 - Автоматическое определение платформы через `detector.py`
@@ -79,7 +99,7 @@
 
 ### Новый LLM провайдер
 1. Наследуйте BaseLLMProvider
-2. Реализуйте `parse_jobs()` и `extract_jobs()`
+2. Реализуйте `complete()` и методы экстракции
 3. Добавьте в `get_llm_provider()` factory
 4. Обновите документацию
 
@@ -89,6 +109,16 @@
 3. Зарегистрируйте в JobBoardParserRegistry
 4. Добавьте паттерн в detector.py
 
+### Новая стратегия экстракции
+1. Создайте класс в `src/extraction/strategies.py`
+2. Реализуйте `extract(html, url) -> list[JobCandidate]`
+3. Избегайте эвристик с ложными срабатываниями!
+
+### Работа с базой данных
+1. Используйте JobRepository для всех операций
+2. Не забывайте await repo.close() или используйте context manager
+3. Для новых таблиц: добавьте схему в connection.py
+
 ## Важные замечания
 - Всегда проверяйте наличие данных перед парсингом
 - Используйте BeautifulSoup для HTML парсинга
@@ -96,4 +126,4 @@
 - Не хардкодьте URL и селекторы - используйте конфигурацию
 - Логируйте важные события (найденные вакансии, ошибки)
 - Поддерживайте обратную совместимость при изменении API
-
+- При добавлении в БД используйте sync_jobs() для правильной истории
