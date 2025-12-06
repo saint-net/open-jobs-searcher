@@ -2,15 +2,15 @@
 
 # Паттерны для поиска ссылок на вакансии в SPA
 JOB_LINK_PATTERNS = [
-    # English
+    # English - specific patterns first
     r'current\s*opening',
-    r'view\s*all',
-    r'see\s*all',
-    r'all\s*jobs',
-    r'open\s*positions',
-    r'job\s*listings',
-    r'browse\s*jobs',
-    r'career\s*portal',
+    r'open\s*positions?',
+    r'job\s*(listings?|openings?)',
+    r'all\s*(jobs?|positions?|openings?|vacancies)',
+    # "See all" / "View all" - но не highlights, articles, news и т.д.
+    r'(view|see)\s*all(?!\s*(highlight|article|news|blog|event|storie|project|client|partner|case))',
+    r'browse\s*(jobs?|positions?|openings?)',
+    r'career\s*(portal|opportunities)',
     r'job\s*portal',
     # German
     r'alle\s*stellen',

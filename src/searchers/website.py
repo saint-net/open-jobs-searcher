@@ -298,12 +298,16 @@ class WebsiteSearcher(BaseSearcher):
                     
                     # 3. Load careers page and look for job board URL
                     # Many companies have a landing page that links to external job board
-                    careers_html = await self._fetch(careers_url)
-                    if careers_html:
-                        job_board_url = await self.llm.find_job_board_url(careers_html, careers_url)
-                        if job_board_url:
-                            logger.info(f"LLM found job board: {job_board_url}")
-                            careers_url = job_board_url
+                    # BUT: Skip if we're already on a known job board platform
+                    if not detect_job_board_platform(careers_url):
+                        careers_html = await self._fetch(careers_url)
+                        if careers_html:
+                            job_board_url = await self.llm.find_job_board_url(careers_html, careers_url)
+                            if job_board_url:
+                                logger.info(f"LLM found job board: {job_board_url}")
+                                careers_url = job_board_url
+                    else:
+                        logger.debug(f"Already on job board platform, skipping job_board_url search")
                 else:
                     logger.warning(f"LLM could not find careers URL on {url}")
                     return []
@@ -318,17 +322,23 @@ class WebsiteSearcher(BaseSearcher):
             for variant_url in self.url_discovery.generate_url_variants(careers_url):
                 # Always use browser with page object for accessibility tree
                 final_url = variant_url
-                already_on_job_board = False
+                already_on_job_board = detect_job_board_platform(variant_url) is not None
                 page_obj = None
                 context_obj = None
                 navigated_to_external = False
                 
                 try:
                     # Fetch with page object for accessibility tree extraction
+                    # Don't navigate if we're already on a job board platform
                     careers_html, final_url, page_obj, context_obj = await self._fetch_with_page_object(
-                        variant_url, navigate_to_jobs=True
+                        variant_url, navigate_to_jobs=not already_on_job_board
                     )
                     final_url = final_url or variant_url
+                    
+                    # Ignore chrome-error:// URLs (navigation failed)
+                    if final_url.startswith("chrome-error://"):
+                        logger.debug(f"Navigation failed (chrome-error), using original URL")
+                        final_url = variant_url
                     
                     # Check if we navigated to a different domain (external career site)
                     # or a known external job board platform

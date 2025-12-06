@@ -220,7 +220,15 @@ class BrowserLoader:
                                 await new_page.wait_for_load_state("domcontentloaded")
                                 await new_page.wait_for_timeout(2500)
                                 
-                                final_url = new_page.url
+                                new_url = new_page.url
+                                
+                                # Check if navigation failed (chrome-error://)
+                                if new_url.startswith("chrome-error://"):
+                                    logger.debug(f"Navigation failed, ignoring error page")
+                                    await new_page.close()
+                                    break
+                                
+                                final_url = new_url
                                 
                                 # Закрываем старую страницу, используем новую
                                 await page.close()
