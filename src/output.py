@@ -40,8 +40,7 @@ def display_execution_time(elapsed_seconds: float) -> None:
 def display_jobs(jobs: list[Job], detailed: bool = False) -> None:
     """Отобразить вакансии в терминале."""
     if not jobs:
-        console.print("[yellow]Вакансии не найдены[/yellow]")
-        return
+        return  # Status message already shown in main.py
 
     table = Table(title=f"Найдено вакансий: {len(jobs)}", show_lines=True)
 
