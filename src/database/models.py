@@ -74,8 +74,11 @@ class SyncResult:
     new_jobs: list = field(default_factory=list)
     removed_jobs: list = field(default_factory=list)
     reactivated_jobs: list = field(default_factory=list)
+    is_first_scan: bool = False  # True if this is the first scan for this site
     
     @property
     def has_changes(self) -> bool:
         """Check if there are any changes."""
         return bool(self.new_jobs or self.removed_jobs or self.reactivated_jobs)
+
+

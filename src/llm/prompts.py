@@ -67,7 +67,10 @@ How to recognize a SPECIFIC job title:
 - More than just one word category
 
 For EACH job found, extract:
-- title: The EXACT job title as written on the page (DO NOT invent or modify!)
+- title: The job title ONLY, without page metadata or suffixes.
+  CLEAN UP: Remove suffixes like "Job advert", "Stellenanzeige", "Job posting", "Vacancy", "Apply now"
+  Example: "Software Engineer (m/w/d) Job advert" → "Software Engineer (m/w/d)"
+  Keep gender notation like (m/w/d) - it's part of the title!
 - location: City/region or "Remote" or "Unknown"  
 - url: Full URL to job details, or page URL if no specific link
 - department: Department if mentioned, otherwise null

@@ -120,3 +120,5 @@ CREATE INDEX IF NOT EXISTS idx_jobs_site_id ON jobs(site_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_is_active ON jobs(is_active);
 CREATE INDEX IF NOT EXISTS idx_job_history_job_id ON job_history(job_id);
 """
+
+

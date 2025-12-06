@@ -11,4 +11,3 @@ __all__ = [
     "get_browser_loader",
     "is_external_job_board",
 ]
-

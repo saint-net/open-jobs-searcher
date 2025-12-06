@@ -162,3 +162,5 @@ class RecruiteeParser(BaseJobBoardParser):
         parsed = urlparse(base_url)
         return f"{parsed.scheme}://{parsed.netloc}/api/offers"
 
+
+

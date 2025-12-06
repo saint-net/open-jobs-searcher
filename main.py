@@ -591,6 +591,12 @@ def _display_sync_result(sync_result) -> None:
     if sync_result is None:
         return
     
+    # Первое сканирование сайта
+    if sync_result.is_first_scan:
+        console.print(f"[green]📊 Первое сканирование: добавлено {sync_result.total_jobs} вакансий в базу[/green]")
+        console.print()
+        return
+    
     if not sync_result.has_changes:
         console.print("[dim]📊 Изменений с прошлого сканирования нет[/dim]")
         console.print()

@@ -100,5 +100,4 @@ async def find_job_navigation_link(page: Page):
             continue
     
     logger.debug("No job navigation link found on page")
-    return None
 

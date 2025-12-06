@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -331,6 +332,9 @@ class JobRepository:
         )
         existing_rows = await cursor.fetchall()
         
+        # Check if this is the first scan (no existing jobs)
+        result.is_first_scan = len(existing_rows) == 0
+        
         # Build lookup by (title, location)
         existing_jobs = {}
         for row in existing_rows:
@@ -488,8 +492,38 @@ class JobRepository:
         return (title_norm, location_norm)
     
     def _normalize_string(self, s: str) -> str:
-        """Normalize string for comparison."""
-        return s.lower().strip()
+        """Normalize string for comparison.
+        
+        Performs robust normalization to avoid false positives in job comparison:
+        - Lowercases and strips whitespace
+        - Removes common suffixes like "Job advert", "Stellenanzeige"
+        - Removes gender notation (m/w/d), (f/d/m), etc.
+        - Normalizes whitespace
+        """
+        result = s.lower().strip()
+        
+        # Remove common job posting suffixes that cause false positives
+        # These are often added by job boards but aren't part of the actual title
+        suffixes_to_remove = [
+            r'\s*job\s*advert\s*$',
+            r'\s*job\s*posting\s*$',
+            r'\s*stellenanzeige\s*$',
+            r'\s*job\s*offer\s*$',
+            r'\s*vacancy\s*$',
+            r'\s*apply\s*now\s*$',
+        ]
+        for pattern in suffixes_to_remove:
+            result = re.sub(pattern, '', result, flags=re.IGNORECASE)
+        
+        # Remove gender notation: (m/w/d), (f/d/m), etc.
+        result = re.sub(r'\s*\([mwfdx/]+\)\s*', ' ', result)
+        # Also without parentheses at end: "Title m/w/d"
+        result = re.sub(r'\s+[mwfdx]/[mwfdx](/[mwfdx])?\s*$', '', result)
+        
+        # Normalize whitespace
+        result = re.sub(r'\s+', ' ', result).strip()
+        
+        return result
     
     def _parse_datetime(self, value) -> Optional[datetime]:
         """Parse datetime from database value."""
@@ -524,3 +558,5 @@ class JobRepository:
             last_seen_at=self._parse_datetime(row["last_seen_at"]),
             is_active=bool(row["is_active"]),
         )
+
+

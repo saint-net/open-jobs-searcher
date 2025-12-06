@@ -146,12 +146,14 @@ class BaseLLMProvider(ABC):
     async def _llm_extract_jobs(self, html: str, url: str) -> list[dict]:
         """LLM-based job extraction (used as fallback by hybrid extractor)."""
         from .prompts import EXTRACT_JOBS_PROMPT
+        from bs4 import BeautifulSoup
         
-        # Try to extract only the main content (where jobs usually are)
-        main_html = self._extract_main_content(html)
+        # Extract body and clean HTML (remove scripts, styles, etc.)
+        soup = BeautifulSoup(html, 'lxml')
+        body = soup.find('body')
+        body_html = str(body) if body else html
         
-        # Clean HTML from scripts and styles
-        clean_html = self._clean_html(main_html)
+        clean_html = self._clean_html(body_html)
 
         # Limit HTML size (80000 chars for large pages)
         html_truncated = clean_html[:80000] if len(clean_html) > 80000 else clean_html
@@ -223,36 +225,6 @@ class BaseLLMProvider(ABC):
             if re.search(pattern, title_lower, re.IGNORECASE):
                 return True
         return False
-    
-    def _extract_main_content(self, html: str) -> str:
-        """Extract main content area from HTML (where jobs are usually located)."""
-        from bs4 import BeautifulSoup
-        
-        soup = BeautifulSoup(html, 'lxml')
-        
-        # Try to find main content container
-        main_selectors = [
-            'main',
-            '[role="main"]',
-            '#main',
-            '#content',
-            '.content',
-            'article',
-            '.main-content',
-            '.page-content',
-        ]
-        
-        for selector in main_selectors:
-            main = soup.select_one(selector)
-            if main and len(str(main)) > 500:  # Ensure it has meaningful content
-                logger.debug(f"Found main content via '{selector}', size: {len(str(main))} chars")
-                return str(main)
-        
-        # Fallback: return body or full HTML
-        body = soup.find('body')
-        if body:
-            return str(body)
-        return html
 
     def _clean_html(self, html: str) -> str:
         """Очистить HTML от скриптов, стилей и лишних атрибутов."""
