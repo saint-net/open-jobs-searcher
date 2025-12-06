@@ -386,7 +386,7 @@ class WebsiteSearcher(BaseSearcher):
                     if not careers_html:
                         continue
                     
-                    # 7. Extract jobs - try direct parser first, then hybrid with accessibility
+                    # 7. Extract jobs - try direct parser first, then LLM with pagination
                     jobs_data = []
                     
                     # For known platforms use direct parser (faster and more reliable)
@@ -397,9 +397,24 @@ class WebsiteSearcher(BaseSearcher):
                         else:
                             jobs_data = self.job_board_parsers.parse(careers_html, variant_url, external_platform)
                     
-                    # Use hybrid extraction with accessibility tree (page object)
+                    # Use LLM extraction with pagination support
                     if not jobs_data:
-                        jobs_data = await self.llm.extract_jobs(careers_html, variant_url, page=page_obj)
+                        # Close page objects before pagination loop (we'll open new ones per page)
+                        if page_obj:
+                            try:
+                                await page_obj.close()
+                            except Exception:
+                                pass
+                            page_obj = None
+                        if context_obj:
+                            try:
+                                await context_obj.close()
+                            except Exception:
+                                pass
+                            context_obj = None
+                        
+                        # Extract jobs with pagination
+                        jobs_data = await self._extract_jobs_from_url(variant_url, url)
                     
                     # Filter jobs if we're on a search results page
                     jobs_data = self._filter_jobs_by_search_query(jobs_data, variant_url)
@@ -652,29 +667,106 @@ class WebsiteSearcher(BaseSearcher):
             logger.warning(f"Error fetching jobs from API {api_url}: {e}")
             return []
 
+    # Maximum pages to scan (to avoid infinite loops)
+    MAX_PAGINATION_PAGES = 3
+
     async def _extract_jobs_from_url(self, careers_url: str, original_url: str) -> list[dict]:
-        """Extract jobs from a single careers URL.
+        """Extract jobs from a careers URL with pagination support.
         
         Args:
             careers_url: URL of careers/jobs page
             original_url: Original company URL (for filtering)
             
         Returns:
-            List of job dictionaries
+            List of job dictionaries from all pages (up to MAX_PAGINATION_PAGES)
+        """
+        all_jobs_data = []
+        current_url = careers_url
+        pages_visited = 0
+        seen_job_keys = set()  # Track unique jobs by (title, location) to detect duplicates
+        
+        while pages_visited < self.MAX_PAGINATION_PAGES:
+            pages_visited += 1
+            
+            jobs_data, next_page_url = await self._extract_jobs_from_single_page(
+                current_url, original_url
+            )
+            
+            if jobs_data:
+                # Check how many jobs are actually new (not duplicates)
+                new_jobs = []
+                for job in jobs_data:
+                    job_key = (
+                        job.get("title", "").lower().strip(),
+                        job.get("location", "").lower().strip()
+                    )
+                    if job_key not in seen_job_keys:
+                        seen_job_keys.add(job_key)
+                        new_jobs.append(job)
+                
+                if new_jobs:
+                    all_jobs_data.extend(new_jobs)
+                    logger.debug(f"Page {pages_visited}: found {len(new_jobs)} new jobs ({len(jobs_data)} total on page)")
+                else:
+                    # All jobs on this page are duplicates - we've looped back
+                    logger.debug(f"Page {pages_visited}: all {len(jobs_data)} jobs are duplicates, stopping pagination")
+                    break
+            
+            # Check if there are more pages
+            if not next_page_url:
+                break
+            
+            # Check if we've hit the pagination limit
+            if pages_visited >= self.MAX_PAGINATION_PAGES:
+                # Log warning about more pages available
+                logger.warning(
+                    f"Pagination limit reached ({self.MAX_PAGINATION_PAGES} pages). "
+                    f"There may be more jobs at: {next_page_url}"
+                )
+                # Also print to console for visibility
+                print(
+                    f"⚠️  Достигнут лимит страниц ({self.MAX_PAGINATION_PAGES}). "
+                    f"Возможно есть ещё вакансии: {next_page_url}"
+                )
+                break
+            
+            current_url = next_page_url
+        
+        if pages_visited > 1:
+            logger.info(f"Total: {len(all_jobs_data)} unique jobs from {pages_visited} pages")
+        
+        return all_jobs_data
+
+    async def _extract_jobs_from_single_page(
+        self, careers_url: str, original_url: str
+    ) -> tuple[list[dict], Optional[str]]:
+        """Extract jobs from a single page.
+        
+        Args:
+            careers_url: URL of careers/jobs page
+            original_url: Original company URL (for filtering)
+            
+        Returns:
+            Tuple of (jobs_data, next_page_url)
         """
         jobs_data = []
+        next_page_url = None
         page_obj = None
         context_obj = None
         
         try:
+            # Load page - navigate to jobs only for base URL without query params
+            # (pages with ?page=N should load directly without navigation)
+            has_query = '?' in careers_url
+            
             # Load page with page object for accessibility tree
             html, final_url, page_obj, context_obj = await self._fetch_with_page_object(
-                careers_url, navigate_to_jobs=True
+                careers_url, navigate_to_jobs=not has_query
             )
             final_url = final_url or careers_url
             
             if not html:
-                return []
+                return [], None
             
             # Check for external job board
             external_platform = detect_job_board_platform(final_url, html)
@@ -690,26 +782,29 @@ class WebsiteSearcher(BaseSearcher):
                     
                     html, _, page_obj, context_obj = await self._fetch_with_page_object(external_board_url)
                     if not html:
-                        return []
+                        return [], None
                     final_url = external_board_url
             
-            # Extract jobs using parser or hybrid with accessibility
+            # Extract jobs using parser or LLM with pagination
             if external_platform:
                 # Check if platform requires API call (e.g., Recruitee)
                 if self.job_board_parsers.is_api_based(external_platform):
                     jobs_data = await self._fetch_jobs_from_api(final_url, external_platform)
                 else:
                     jobs_data = self.job_board_parsers.parse(html, final_url, external_platform)
-            
-            if not jobs_data:
-                jobs_data = await self.llm.extract_jobs(html, final_url, page=page_obj)
+                # No pagination for external platforms (they handle it themselves)
+            else:
+                # Use LLM extraction with pagination support
+                result = await self.llm.extract_jobs_with_pagination(html, final_url)
+                jobs_data = result.get("jobs", [])
+                next_page_url = result.get("next_page_url")
             
             logger.debug(f"Extracted {len(jobs_data)} jobs from {final_url}")
-            return jobs_data
+            return jobs_data, next_page_url
             
         except Exception as e:
             logger.warning(f"Error extracting jobs from {careers_url}: {e}")
-            return []
+            return [], None
         finally:
             # Clean up page and context
             if page_obj:

@@ -30,66 +30,73 @@ URL: {url}
 HTML:
 {html}
 
-TASK: Find ALL SPECIFIC job postings and extract them as JSON.
+TASK: Find ALL job postings AND the next page link.
 
-CRITICAL - What IS a job posting:
-- SPECIFIC position titles: "Senior Software Developer (m/w/d)", "Sales Manager - EMEA", "Marketing Specialist"
-- Contains role specifics: level (Junior/Senior), specialization, department
-- Usually has: title + location + link to apply/details
-- Examples of REAL job postings:
-  * "Werkstudent Sales (m/w/d)" - specific role with gender notation
-  * "Senior Backend Developer" - specific position
-  * "Customer Success Manager - DACH Region" - role with region
+=== JOB EXTRACTION ===
 
-CRITICAL - What is NOT a job posting (DO NOT EXTRACT):
-- Standalone categories WITHOUT any job details: just text like "Sales", "Engineering" as menu items
-- DEPARTMENT NAMES without context: "IT Department", "Human Resources" as section headers only
-- AREAS OF WORK as promotional text: "We're hiring in Sales", "Join our Engineering team"
-- Pages that ONLY say "Send resume to jobs@company.com" with NO position listings at all
+What IS a job posting:
+- SPECIFIC position titles: "Senior Software Developer (m/w/d)", "Sales Manager - EMEA"
+- Anything with "(m/w/d)" or "(m/f/d)" = DEFINITELY a job!
+- Has role specifics: level, specialization, department
 
-IMPORTANT: Generic names CAN be real jobs if they have context:
-- "Technical Support" with experience requirements (e.g. "0-6 years") = REAL JOB
-- "Programming" in expandable card with job details = REAL JOB
-- "Sales" with location (e.g. "Bangalore") = REAL JOB
-- If position has ANY details (experience, location, description) = extract it!
+What is NOT a job (DO NOT EXTRACT):
+- Department headers: "IT Department", "Human Resources" (without job title)
+- Promotional text: "We're hiring in Sales"
 
-Where to look for job titles:
-- <li> list items containing SPECIFIC job names
-- <a> links with job titles in text
-- Headings (h1, h2, h3, h4) with SPECIFIC position names
-- Cards, divs with job information
-- Text near "Stellen ausgeschrieben" or "open positions"
-
-How to recognize a SPECIFIC job title:
-- Contains "(m/w/d)" or "(m/f/d)" - DEFINITELY a job title!
-- Has role specifics: "Software Developer", "Sales Manager", "Support Engineer"
-- German titles: "Werkstudent Marketing", "Praktikant Entwicklung", "Mitarbeiter Vertrieb"
-- More than just one word category
-
-For EACH job found, extract:
-- title: The job title ONLY, without page metadata or suffixes.
-  CLEAN UP: Remove suffixes like "Job advert", "Stellenanzeige", "Job posting", "Vacancy", "Apply now"
-  Example: "Software Engineer (m/w/d) Job advert" → "Software Engineer (m/w/d)"
-  Keep gender notation like (m/w/d) - it's part of the title!
+For EACH job, extract:
+- title: Job title (keep (m/w/d), remove "Job advert"/"Stellenanzeige" suffixes)
 - location: City/region or "Remote" or "Unknown"  
-- url: Full URL to job details, or page URL if no specific link
-- department: Department if mentioned, otherwise null
+- url: Full URL to job details (https://...)
+- department: If mentioned, otherwise null
 
-OUTPUT FORMAT - Return ONLY a JSON array:
+=== PAGINATION (CRITICAL!) ===
+
+Search the HTML for pagination elements. Look for:
+
+1. PAGE NUMBERS in navigation:
+   - <nav class="pager"> or <ul class="pagination">
+   - Links like: "1" (current), "2" (next), "3", etc.
+   - Current page often has: class="active", class="is-active", aria-current="page"
+   - Next page = the number AFTER the current/active one
+
+2. NEXT PAGE LINKS:
+   - Text: "Next", "»", "›", "→", "Weiter", "Nächste Seite", "Nächste"
+   - Text: "Page 2", "Seite 2"
+   - Href patterns: ?page=1, ?page=2, &page=2, /page/2
+
+3. LOAD MORE BUTTONS:
+   - "Load more", "Show more", "Mehr laden", "Mehr anzeigen"
+
+HOW TO FIND next_page_url:
+1. Find the pagination <nav> or <ul> element
+2. Find the CURRENT page (active/highlighted)
+3. Get the href of the NEXT page link
+4. Return the FULL URL (add domain if href is relative)
+
+EXAMPLES:
+- If current page shows "Page 1" and there's a link to "Page 2" with href="?page=1"
+  → next_page_url = "{url}?page=1"
+- If you see "Nächste Seite ›" with href="/jobs?page=2"  
+  → next_page_url = "https://domain.com/jobs?page=2"
+- If current page is the LAST page (no next link) → next_page_url = null
+
+=== OUTPUT FORMAT ===
+
+Return ONLY valid JSON:
 ```json
-[
-  {{"title": "Job Title Here", "location": "City", "url": "https://...", "department": null}}
-]
+{{
+  "jobs": [
+    {{"title": "Job Title (m/w/d)", "location": "City", "url": "https://...", "department": null}}
+  ],
+  "next_page_url": "https://example.com/jobs?page=2"
+}}
 ```
 
 RULES:
-1. Extract job positions - even generic names if they have details (experience, location)!
-2. DO NOT invent job titles - use EXACT text from the page!
-3. If position has context (experience, location, description) = it's a real job
-4. Anything with "(m/w/d)" or "(m/f/d)" is a job - extract it!
-5. Return valid JSON only, no extra text
-6. Empty array [] ONLY if page has NO job listings at all (just "email us")
-7. Use full URLs (include https://domain)
+1. Extract EXACT job titles from the page
+2. Use FULL URLs (https://domain/path)
+3. next_page_url = null ONLY if this is the last page or no pagination
+4. Return valid JSON only
 
 JSON:
 """

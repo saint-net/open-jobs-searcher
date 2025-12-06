@@ -54,6 +54,7 @@ COOKIE_ACCEPT_PATTERNS = [
     # German
     r'(ich\s+)?akzeptiere?\s*(alle)?',
     r'alle\s*akzeptieren',
+    r'alle\s*bestätigen',  # "Alle bestätigen" (confirm all)
     r'zustimmen',
     r'einverstanden',
     r'annehmen',

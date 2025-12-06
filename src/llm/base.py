@@ -143,8 +143,41 @@ class BaseLLMProvider(ABC):
         logger.warning(f"Failed to extract jobs from {url}")
         return []
     
+    async def extract_jobs_with_pagination(self, html: str, url: str) -> dict:
+        """
+        Extract job listings with pagination info using LLM directly.
+        
+        This method bypasses Schema.org and uses LLM directly to get
+        both jobs and next_page_url in a single request.
+
+        Args:
+            html: HTML content of the careers page
+            url: URL of the page
+
+        Returns:
+            Dict with "jobs" (list) and "next_page_url" (str or None)
+        """
+        result = await self._llm_extract_jobs_with_pagination(html, url)
+        
+        jobs = result.get("jobs", [])
+        if jobs:
+            valid_jobs = self._validate_jobs(jobs)
+            result["jobs"] = valid_jobs
+        
+        return result
+    
     async def _llm_extract_jobs(self, html: str, url: str) -> list[dict]:
         """LLM-based job extraction (used as fallback by hybrid extractor)."""
+        # Use the new method and return only jobs for backward compatibility
+        result = await self._llm_extract_jobs_with_pagination(html, url)
+        return result.get("jobs", [])
+    
+    async def _llm_extract_jobs_with_pagination(self, html: str, url: str) -> dict:
+        """LLM-based job extraction with pagination support.
+        
+        Returns:
+            Dict with "jobs" (list) and "next_page_url" (str or None)
+        """
         from .prompts import EXTRACT_JOBS_PROMPT
         from bs4 import BeautifulSoup
         
@@ -168,16 +201,24 @@ class BaseLLMProvider(ABC):
         # Retry extraction if result is empty (LLM can be inconsistent)
         for attempt in range(self.MAX_EXTRACTION_RETRIES):
             response = await self.complete(prompt)
-            jobs = self._extract_json(response)
+            result = self._extract_json(response)
             
-            if isinstance(jobs, list) and len(jobs) > 0:
-                logger.debug(f"LLM extracted {len(jobs)} jobs on attempt {attempt + 1}")
-                return jobs
+            # Handle new format: {"jobs": [...], "next_page_url": ...}
+            if isinstance(result, dict) and "jobs" in result:
+                jobs = result.get("jobs", [])
+                next_page_url = result.get("next_page_url")
+                if isinstance(jobs, list) and len(jobs) > 0:
+                    logger.debug(f"LLM extracted {len(jobs)} jobs on attempt {attempt + 1}")
+                    return {"jobs": jobs, "next_page_url": next_page_url}
+            # Handle old format: [...] (for backward compatibility)
+            elif isinstance(result, list) and len(result) > 0:
+                logger.debug(f"LLM extracted {len(result)} jobs on attempt {attempt + 1}")
+                return {"jobs": result, "next_page_url": None}
             
             if attempt < self.MAX_EXTRACTION_RETRIES - 1:
                 logger.debug(f"LLM attempt {attempt + 1} returned no jobs, retrying...")
         
-        return []
+        return {"jobs": [], "next_page_url": None}
     
     # Non-job titles to filter out (open applications, general inquiries, etc.)
     NON_JOB_PATTERNS = [
@@ -299,7 +340,15 @@ class BaseLLMProvider(ABC):
             except json.JSONDecodeError:
                 pass
 
-        # Пробуем найти JSON массив напрямую
+        # Пробуем найти JSON объект с "jobs" ключом (новый формат с пагинацией)
+        object_match = re.search(r'\{[\s\S]*"jobs"[\s\S]*\}', response)
+        if object_match:
+            try:
+                return json.loads(object_match.group(0))
+            except json.JSONDecodeError:
+                pass
+
+        # Пробуем найти JSON массив напрямую (старый формат)
         array_match = re.search(r'\[[\s\S]*\]', response)
         if array_match:
             try:
