@@ -554,19 +554,37 @@ class BaseLLMProvider(ABC):
                     continue
         
         # Try generic selectors for other platforms
+        candidates = []
+        
         for selector in self.JOB_SECTION_SELECTORS:
             try:
                 elements = soup.select(selector)
+                valid_elements = []
                 for el in elements:
                     el_text = el.get_text().lower()
                     # Check if element contains job-related content
-                    if any(marker in el_text for marker in ['(m/w/d)', '(m/f/d)', 'vollzeit', 'teilzeit', 'job', 'position', 'stelle']):
+                    if any(marker in el_text for marker in ['(m/w/d)', '(m/f/d)', 'vollzeit', 'teilzeit', 'job', 'position', 'stelle', 'develop', 'engineer', 'manager']):
                         html = str(el)
                         # Size check: must be substantial but not too large
-                        if 1000 < len(html) < 200000:
-                            return html
+                        # Lower limit to 300 to catch individual job cards, upper remains 200k
+                        if 300 < len(html) < 200000:
+                            valid_elements.append(html)
+                
+                if valid_elements:
+                    # Combine all found elements (e.g. list of job cards)
+                    combined_html = "\n<hr>\n".join(valid_elements)
+                    # If total size is substantial, consider it a candidate
+                    if len(combined_html) > 1000:
+                        candidates.append((len(combined_html), combined_html))
             except Exception:
                 continue
+                
+        # Sort candidates by size (descending) to prefer larger collections
+        if candidates:
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            return candidates[0][1]
+            
+        return None
         
         return None
     
