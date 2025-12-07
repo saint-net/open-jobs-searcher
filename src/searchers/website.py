@@ -193,7 +193,13 @@ class WebsiteSearcher(BaseSearcher):
         seen = set()
         unique_jobs_data = []
         for job_data in all_jobs_data:
-            job_url = job_data.get("url", "").strip()
+            job_url = job_data.get("url", "")
+            # Handle None or "None" as empty
+            if job_url is None or job_url == "None" or job_url == "null":
+                job_url = ""
+            else:
+                job_url = str(job_url).strip()
+            
             title_loc_key = (
                 self._normalize_title(job_data.get("title", "")),
                 self._normalize_location(job_data.get("location", ""))
@@ -715,7 +721,13 @@ class WebsiteSearcher(BaseSearcher):
                 new_jobs = []
                 for job in jobs_data:
                     # Primary key: URL (most reliable)
-                    job_url = job.get("url", "").strip()
+                    job_url = job.get("url", "")
+                    # Handle None or "None" as empty
+                    if job_url is None or job_url == "None" or job_url == "null":
+                        job_url = ""
+                    else:
+                        job_url = str(job_url).strip()
+                    
                     # Fallback key: (title, location) for jobs without URL
                     title_loc_key = (
                         self._normalize_title(job.get("title", "")),
@@ -728,6 +740,8 @@ class WebsiteSearcher(BaseSearcher):
                     if job_key not in seen_job_keys:
                         seen_job_keys.add(job_key)
                         new_jobs.append(job)
+                    else:
+                        logger.debug(f"Duplicate job skipped: {job.get('title', '')[:40]} | key={job_key if isinstance(job_key, str) else job_key[0][:30]}")
                 
                 if new_jobs:
                     all_jobs_data.extend(new_jobs)
