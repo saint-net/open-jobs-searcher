@@ -54,6 +54,29 @@ async def find_job_navigation_link(page: Page):
     Returns:
         Элемент для клика или None
     """
+    # Patterns to exclude (individual job pages, not listings)
+    EXCLUDE_PATTERNS = [
+        r'stellenprofil',  # German: job profile (individual job)
+        r'bewerbung',  # German: application
+        r'bewerben',  # German: apply
+        r'job-detail',
+        r'/job/[^/]+$',  # Individual job URLs
+        r'#apply',
+        r'#bewerbung',
+    ]
+    
+    def is_excluded_link(href: str, text: str) -> bool:
+        """Check if link should be excluded (job detail page, not listing)."""
+        href_lower = href.lower()
+        text_lower = text.lower()
+        
+        for pattern in EXCLUDE_PATTERNS:
+            if re.search(pattern, href_lower, re.IGNORECASE):
+                return True
+            if re.search(pattern, text_lower, re.IGNORECASE):
+                return True
+        return False
+    
     # First, try to find links by href containing karriere/jobs/career patterns
     try:
         links = await page.query_selector_all('a[href]')
@@ -63,10 +86,19 @@ async def find_job_navigation_link(page: Page):
                 if not href:
                     continue
                 
+                text = ""
+                try:
+                    text = await link.inner_text()
+                except Exception:
+                    pass
+                
+                # Skip individual job pages
+                if is_excluded_link(href, text):
+                    continue
+                
                 for pattern in JOB_HREF_PATTERNS:
                     if re.search(pattern, href, re.IGNORECASE):
                         if await link.is_visible():
-                            text = await link.inner_text()
                             logger.debug(f"Found job link by href: '{href}' (text: '{text.strip()[:30]}')")
                             return link
             except Exception:
@@ -100,4 +132,5 @@ async def find_job_navigation_link(page: Page):
             continue
     
     logger.debug("No job navigation link found on page")
+
 

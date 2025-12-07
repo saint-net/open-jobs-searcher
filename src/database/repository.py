@@ -486,9 +486,14 @@ class JobRepository:
     # ==================== Utilities ====================
     
     def _job_key(self, title: str, location: Optional[str]) -> tuple:
-        """Create unique key for job comparison."""
+        """Create unique key for job comparison.
+        
+        Uses separate normalization for title and location:
+        - Title: removes job posting suffixes, gender notation
+        - Location: removes country suffixes, employment type indicators
+        """
         title_norm = self._normalize_string(title)
-        location_norm = self._normalize_string(location) if location else ""
+        location_norm = self._normalize_location(location) if location else ""
         return (title_norm, location_norm)
     
     def _normalize_string(self, s: str) -> str:
@@ -522,6 +527,56 @@ class JobRepository:
         
         # Normalize whitespace
         result = re.sub(r'\s+', ' ', result).strip()
+        
+        return result
+    
+    def _normalize_location(self, location: str) -> str:
+        """Normalize location for comparison.
+        
+        Handles variations like:
+        - "Erftstadt, Deutschland" vs "Erftstadt"
+        - "Berlin, Germany" vs "Berlin"
+        - "Remote, Deutschland" vs "Remote"
+        """
+        result = location.lower().strip()
+        
+        # Remove country suffixes (with comma or space)
+        countries_to_remove = [
+            r',?\s*deutschland\s*$',
+            r',?\s*germany\s*$',
+            r',?\s*österreich\s*$',
+            r',?\s*austria\s*$',
+            r',?\s*schweiz\s*$',
+            r',?\s*switzerland\s*$',
+            r',?\s*united\s*kingdom\s*$',
+            r',?\s*uk\s*$',
+            r',?\s*usa\s*$',
+            r',?\s*united\s*states\s*$',
+            r',?\s*netherlands\s*$',
+            r',?\s*france\s*$',
+            r',?\s*spain\s*$',
+            r',?\s*italy\s*$',
+            r',?\s*poland\s*$',
+        ]
+        for pattern in countries_to_remove:
+            result = re.sub(pattern, '', result, flags=re.IGNORECASE)
+        
+        # Remove employment type suffixes often mixed with location
+        employment_suffixes = [
+            r',?\s*vollzeit\s*$',
+            r',?\s*teilzeit\s*$',
+            r',?\s*full[\s-]*time\s*$',
+            r',?\s*part[\s-]*time\s*$',
+            r',?\s*remote\s*$',  # If at end after city
+            r',?\s*hybrid\s*$',
+            r',?\s*inkl\.?\s*home\s*office\s*$',
+        ]
+        for pattern in employment_suffixes:
+            result = re.sub(pattern, '', result, flags=re.IGNORECASE)
+        
+        # Normalize whitespace and remove trailing commas
+        result = re.sub(r'\s+', ' ', result).strip()
+        result = result.rstrip(',').strip()
         
         return result
     

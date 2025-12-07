@@ -68,3 +68,4 @@ async def handle_cookie_consent(page: Page) -> bool:
     logger.debug("No cookie consent dialog found")
     return False
 
+

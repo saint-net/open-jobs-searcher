@@ -180,14 +180,28 @@ class WebsiteSearcher(BaseSearcher):
             logger.info(f"All cached URLs failed for {domain}, falling back to full discovery")
             return None
         
-        # Deduplicate by (title, location)
+        # Filter jobs by source company if using external career portal
+        if working_url:
+            career_domain = urlparse(working_url.url).netloc
+            source_domain = urlparse(url).netloc.replace('www.', '')
+            if career_domain != source_domain and career_domain != f"www.{source_domain}":
+                # External career portal - filter by source company
+                logger.debug(f"Filtering jobs from external portal {career_domain} for {source_domain}")
+                all_jobs_data = self._filter_jobs_by_source_company(all_jobs_data, url)
+        
+        # Deduplicate by URL (primary) or (title, location) (fallback)
         seen = set()
         unique_jobs_data = []
         for job_data in all_jobs_data:
-            key = (
-                job_data.get("title", "").lower().strip(),
-                job_data.get("location", "").lower().strip()
+            job_url = job_data.get("url", "").strip()
+            title_loc_key = (
+                self._normalize_title(job_data.get("title", "")),
+                self._normalize_location(job_data.get("location", ""))
             )
+            
+            # Use URL as key if available, otherwise title+location
+            key = job_url if job_url else title_loc_key
+            
             if key not in seen:
                 seen.add(key)
                 unique_jobs_data.append(job_data)
@@ -671,12 +685,20 @@ class WebsiteSearcher(BaseSearcher):
             
             if jobs_data:
                 # Check how many jobs are actually new (not duplicates)
+                # Use URL in key for multi-company portals where same title exists
                 new_jobs = []
                 for job in jobs_data:
-                    job_key = (
-                        job.get("title", "").lower().strip(),
-                        job.get("location", "").lower().strip()
+                    # Primary key: URL (most reliable)
+                    job_url = job.get("url", "").strip()
+                    # Fallback key: (title, location) for jobs without URL
+                    title_loc_key = (
+                        self._normalize_title(job.get("title", "")),
+                        self._normalize_location(job.get("location", ""))
                     )
+                    
+                    # Use URL as key if available, otherwise title+location
+                    job_key = job_url if job_url else title_loc_key
+                    
                     if job_key not in seen_job_keys:
                         seen_job_keys.add(job_key)
                         new_jobs.append(job)
@@ -807,6 +829,56 @@ class WebsiteSearcher(BaseSearcher):
         name = re.sub(r'\.(com|ru|org|net|io|co|tech)$', '', name)
         
         return name.title()
+    
+    def _normalize_title(self, title: str) -> str:
+        """Normalize job title for deduplication.
+        
+        Removes gender notation and normalizes whitespace.
+        """
+        result = title.lower().strip()
+        
+        # Remove gender notation: (m/w/d), (f/d/m), etc.
+        result = re.sub(r'\s*\([mwfdx/]+\)\s*', ' ', result)
+        result = re.sub(r'\s+[mwfdx]/[mwfdx](/[mwfdx])?\s*$', '', result)
+        
+        # Normalize whitespace
+        result = re.sub(r'\s+', ' ', result).strip()
+        
+        return result
+    
+    def _normalize_location(self, location: str) -> str:
+        """Normalize location for deduplication.
+        
+        Removes country suffixes and employment type indicators.
+        """
+        result = location.lower().strip()
+        
+        # Remove country suffixes
+        countries = [
+            r',?\s*deutschland\s*$',
+            r',?\s*germany\s*$',
+            r',?\s*österreich\s*$',
+            r',?\s*austria\s*$',
+            r',?\s*schweiz\s*$',
+            r',?\s*switzerland\s*$',
+        ]
+        for pattern in countries:
+            result = re.sub(pattern, '', result, flags=re.IGNORECASE)
+        
+        # Remove employment type suffixes
+        employment = [
+            r',?\s*vollzeit\s*$',
+            r',?\s*teilzeit\s*$',
+            r',?\s*inkl\.?\s*home\s*office\s*$',
+        ]
+        for pattern in employment:
+            result = re.sub(pattern, '', result, flags=re.IGNORECASE)
+        
+        # Normalize whitespace
+        result = re.sub(r'\s+', ' ', result).strip()
+        result = result.rstrip(',').strip()
+        
+        return result
 
     def _filter_jobs_by_search_query(self, jobs_data: list[dict], url: str) -> list[dict]:
         """Filter jobs to only those matching the search query in URL.
@@ -882,10 +954,17 @@ class WebsiteSearcher(BaseSearcher):
             company_base.lower().replace('-', ' '),  # for domains like "my-company"
         ]
         
-        # Add common variations
-        # "2rsoftware" -> also match "2r software", "2r"
-        if company_base.lower().startswith('2r'):
-            company_variants.extend(['2r software', '2r'])
+        # Add common variations for company names
+        # Split camelCase or numbers: "2rsoftware" -> "2r software", "2r"
+        # Also handle "XYZcompany" -> "xyz company", "xyz"
+        import re
+        # Try to split at number-letter boundary: "2rsoftware" -> "2r", "software"
+        match = re.match(r'^(\d+[a-z]?)(.*)$', company_base.lower())
+        if match:
+            prefix = match.group(1)  # "2r"
+            suffix = match.group(2)  # "software"
+            company_variants.append(f"{prefix} {suffix}")  # "2r software"
+            company_variants.append(prefix)  # "2r"
         
         # Filter jobs that mention the source company
         filtered = []

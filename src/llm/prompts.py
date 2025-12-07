@@ -77,6 +77,7 @@ What is NOT a job (DO NOT EXTRACT):
 
 For EACH job, extract:
 - title: Job title (keep (m/w/d), remove "Job advert"/"Stellenanzeige" suffixes)
+- company: Company/employer name if shown on job card (e.g., "Acme Corp", "TechStart GmbH")
 - location: City/region or "Remote" or "Unknown"  
 - url: Full URL to job details (https://...)
 - department: If mentioned, otherwise null
@@ -118,7 +119,7 @@ Return ONLY valid JSON:
 ```json
 {{
   "jobs": [
-    {{"title": "Job Title (m/w/d)", "location": "City", "url": "https://...", "department": null}}
+    {{"title": "Job Title (m/w/d)", "company": "Company Name", "location": "City", "url": "https://...", "department": null}}
   ],
   "next_page_url": "https://example.com/jobs?page=2"
 }}
