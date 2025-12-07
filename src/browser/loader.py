@@ -94,6 +94,41 @@ class BrowserLoader:
             await self._playwright.stop()
             self._playwright = None
 
+    async def _scroll_and_wait_for_content(self, page: Page, max_scrolls: int = 3) -> None:
+        """Scroll page to trigger lazy-loaded content (e.g., external job widgets).
+        
+        Many sites embed job listings via JS widgets (join.com, personio, etc.)
+        that only load when scrolled into view. This method scrolls incrementally
+        and waits for network activity to settle.
+        
+        Args:
+            page: Playwright Page object
+            max_scrolls: Number of scroll increments
+        """
+        try:
+            # Scroll down incrementally to trigger lazy loading
+            for _ in range(max_scrolls):
+                await page.evaluate("window.scrollBy(0, window.innerHeight)")
+                await page.wait_for_timeout(500)
+            
+            # Wait at bottom for widget to load data
+            await page.wait_for_timeout(2000)
+            
+            # Scroll back to top
+            await page.evaluate("window.scrollTo(0, 0)")
+            
+            # Wait for network idle (external widgets load their content)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass  # Timeout is OK, continue with what we have
+            
+            # Additional wait for widget JS to render content after data arrives
+            await page.wait_for_timeout(1500)
+                
+        except Exception as e:
+            logger.debug(f"Scroll/wait failed (continuing): {e}")
+
     async def fetch(self, url: str, wait_for: Optional[str] = None) -> Optional[str]:
         """
         Загрузить страницу и получить HTML после рендеринга JavaScript.
@@ -201,6 +236,9 @@ class BrowserLoader:
                     break
                 await page.wait_for_timeout(500)
             
+            # Scroll to trigger lazy-loaded content (external job widgets)
+            await self._scroll_and_wait_for_content(page)
+            
             final_url = url
             
             # Навигация к вакансиям если нужно
@@ -255,6 +293,9 @@ class BrowserLoader:
                             logger.debug(f"Click failed: {e}")
                     else:
                         break
+            
+            # Scroll again after navigation to trigger lazy content on final page
+            await self._scroll_and_wait_for_content(page)
             
             html = await page.content()
             return html, final_url, page, context

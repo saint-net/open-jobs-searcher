@@ -408,9 +408,16 @@ class BaseLLMProvider(ABC):
         # Extract body and clean HTML (remove scripts, styles, etc.)
         soup = BeautifulSoup(html, 'lxml')
         body = soup.find('body')
-        body_html = str(body) if body else html
         
-        clean_html = self._clean_html(body_html)
+        # Try to find job listing sections first (they may be at end of page, outside truncation)
+        job_section_html = self._find_job_section(soup)
+        
+        if job_section_html:
+            clean_html = self._clean_html(job_section_html)
+            logger.debug(f"Found job section, size: {len(clean_html)} chars")
+        else:
+            body_html = str(body) if body else html
+            clean_html = self._clean_html(body_html)
 
         # Limit HTML size (80000 chars for large pages)
         html_truncated = clean_html[:80000] if len(clean_html) > 80000 else clean_html
@@ -486,6 +493,94 @@ class BaseLLMProvider(ABC):
             }
             valid_jobs.append(valid_job)
         return valid_jobs
+    
+    # CSS selectors for common job listing containers/widgets
+    JOB_SECTION_SELECTORS = [
+        # Odoo job widgets
+        '.oe_website_jobs',
+        '.o_website_hr_recruitment_jobs_list',
+        '[class*="website_jobs"]',
+        '[class*="hr_recruitment"]',
+        # Join.com widget
+        '.join-jobs-widget',
+        '[class*="join-jobs"]',
+        # Personio
+        '.personio-jobs',
+        '[class*="personio"]',
+        # Generic job containers
+        '[class*="job-list"]',
+        '[class*="jobs-list"]',
+        '[class*="vacancies"]',
+        '[class*="career-list"]',
+        '[class*="openings"]',
+        '[id*="jobs"]',
+        '[id*="vacancies"]',
+        '[id*="careers"]',
+        # Main content with job-related text
+        'main',
+        'article',
+        '.content',
+    ]
+    
+    def _find_job_section(self, soup) -> str | None:
+        """Find the HTML section containing job listings.
+        
+        Many pages have job widgets at the end of large HTML documents.
+        This method finds the relevant section to avoid truncation issues.
+        
+        Args:
+            soup: BeautifulSoup object of the page
+            
+        Returns:
+            HTML string of job section, or None if not found
+        """
+        # Check if this is an Odoo site first (most reliable detection)
+        if self._is_odoo_site(soup):
+            logger.debug("Detected Odoo site, using Odoo-specific selectors")
+            odoo_selectors = [
+                '.o_website_hr_recruitment_jobs_list',
+                '.oe_website_jobs', 
+                '[class*="o_website_hr"]',
+                '[class*="oe_website_jobs"]',
+            ]
+            for selector in odoo_selectors:
+                try:
+                    elements = soup.select(selector)
+                    for el in elements:
+                        html = str(el)
+                        if 1000 < len(html) < 200000:
+                            return html
+                except Exception:
+                    continue
+        
+        # Try generic selectors for other platforms
+        for selector in self.JOB_SECTION_SELECTORS:
+            try:
+                elements = soup.select(selector)
+                for el in elements:
+                    el_text = el.get_text().lower()
+                    # Check if element contains job-related content
+                    if any(marker in el_text for marker in ['(m/w/d)', '(m/f/d)', 'vollzeit', 'teilzeit', 'job', 'position', 'stelle']):
+                        html = str(el)
+                        # Size check: must be substantial but not too large
+                        if 1000 < len(html) < 200000:
+                            return html
+            except Exception:
+                continue
+        
+        return None
+    
+    def _is_odoo_site(self, soup) -> bool:
+        """Check if site is running Odoo CMS.
+        
+        Odoo adds a meta generator tag to all pages.
+        This is the most reliable way to detect Odoo sites.
+        """
+        generator = soup.find('meta', attrs={'name': 'generator'})
+        if generator:
+            content = generator.get('content', '') or ''
+            return 'odoo' in content.lower()
+        return False
     
     def _is_non_job_entry(self, title: str) -> bool:
         """Check if title is a non-job entry (open application, etc.)."""

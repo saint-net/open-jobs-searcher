@@ -14,6 +14,7 @@ from src.searchers.job_boards.lever import LeverParser
 from src.searchers.job_boards.deloitte import DeloitteParser
 from src.searchers.job_boards.workable import WorkableParser
 from src.searchers.job_boards.recruitee import RecruiteeParser
+from src.searchers.job_boards.odoo import OdooParser
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class JobBoardParserRegistry:
         self.register(DeloitteParser())
         self.register(WorkableParser())
         self.register(RecruiteeParser())
+        self.register(OdooParser())
 
     def register(self, parser: BaseJobBoardParser):
         """Register a parser for a platform."""

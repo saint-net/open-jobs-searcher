@@ -62,6 +62,10 @@ def detect_job_board_platform(url: str, html: Optional[str] = None) -> Optional[
         # Check for Recruitee (uses custom domains)
         if detect_recruitee_from_html(html):
             return 'recruitee'
+            
+        # Check for Odoo (uses meta tag or specialized classes)
+        if detect_odoo_from_html(html):
+            return 'odoo'
     
     return None
 
@@ -163,6 +167,42 @@ def detect_recruitee_from_html(html: str) -> bool:
         logger.debug("Detected Recruitee from raw HTML")
         return True
     
+    return False
+
+
+def detect_odoo_from_html(html: str) -> bool:
+    """Detect if a page is powered by Odoo.
+    
+    Args:
+        html: HTML content of the page
+        
+    Returns:
+        True if page is powered by Odoo
+    """
+    # 1. Check meta generator (most reliable)
+    # <meta name="generator" content="Odoo">
+    soup = BeautifulSoup(html, 'lxml')
+    generator = soup.find('meta', attrs={'name': 'generator'})
+    if generator:
+        content = generator.get('content', '') or ''
+        if 'odoo' in content.lower():
+            logger.debug("Detected Odoo from meta generator")
+            return True
+            
+    # 2. Check for Odoo class prefixes
+    # o_website_*, oe_website_*, o_hr_recruitment
+    if 'o_website_' in html or 'oe_website_' in html:
+        # Check specific recruitment classes to be sure it's not just a generic Odoo site
+        if 'o_website_hr_recruitment' in html or 'oe_website_jobs' in html:
+            logger.debug("Detected Odoo from HTML classes")
+            return True
+    
+    # 3. Check for Odoo scripts
+    # /web/assets/
+    if '/web/assets/' in html and 'odoo' in html.lower():
+        logger.debug("Detected Odoo from script assets")
+        return True
+        
     return False
 
 

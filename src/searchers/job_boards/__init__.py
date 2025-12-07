@@ -7,6 +7,7 @@ from src.searchers.job_boards.detector import (
     find_external_job_board,
 )
 from src.searchers.job_boards.registry import JobBoardParserRegistry
+from src.searchers.job_boards.odoo import OdooParser
 
 __all__ = [
     "BaseJobBoardParser",
@@ -14,4 +15,6 @@ __all__ = [
     "detect_job_board_platform",
     "find_external_job_board",
     "JobBoardParserRegistry",
+    "OdooParser",
 ]
+
