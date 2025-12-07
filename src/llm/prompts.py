@@ -295,7 +295,7 @@ URL: {url}
 {html}
 ===END_UNTRUSTED_HTML===
 
-TASK: Extract a brief description of the company (3-4 sentences).
+TASK: Extract a brief description of the company (4-6 sentences).
 
 === WHAT TO INCLUDE ===
 1. What the company does (main business/products/services)
@@ -310,7 +310,7 @@ TASK: Extract a brief description of the company (3-4 sentences).
 
 === OUTPUT ===
 
-Return ONLY a brief description (3-4 sentences in English).
+Return ONLY a brief description (4-6 sentences in English).
 If you cannot determine what the company does, return: UNKNOWN
 """
 
