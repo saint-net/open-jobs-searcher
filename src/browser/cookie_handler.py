@@ -69,3 +69,4 @@ async def handle_cookie_consent(page: Page) -> bool:
     return False
 
 
+

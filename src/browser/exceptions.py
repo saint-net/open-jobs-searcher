@@ -10,3 +10,4 @@ class PlaywrightBrowsersNotInstalledError(Exception):
     """Raised when Playwright browsers are not installed."""
     pass
 
+

@@ -12,6 +12,7 @@ class Site:
     id: int
     domain: str
     name: Optional[str] = None
+    description: Optional[str] = None
     created_at: Optional[datetime] = None
     last_scanned_at: Optional[datetime] = None
 

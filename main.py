@@ -400,6 +400,7 @@ async def _show_sites() -> None:
             SELECT 
                 s.domain,
                 s.name,
+                s.description,
                 s.last_scanned_at,
                 COUNT(DISTINCT CASE WHEN j.is_active = 1 THEN j.id END) as active_jobs,
                 COUNT(DISTINCT j.id) as total_jobs,
@@ -419,6 +420,7 @@ async def _show_sites() -> None:
         for row in rows:
             domain = row["domain"]
             name = row["name"] or domain
+            description = row["description"] if "description" in row.keys() else None
             active_jobs = row["active_jobs"]
             total_jobs = row["total_jobs"]
             career_urls = row["career_urls"]
@@ -439,6 +441,8 @@ async def _show_sites() -> None:
             removed_str = f" [dim](-{removed} закрыто)[/dim]" if removed > 0 else ""
             
             console.print(f"  [bold]{name}[/bold] ({domain})")
+            if description:
+                console.print(f"    [dim]{description}[/dim]")
             console.print(f"    Вакансий: {active_jobs}{removed_str}")
             console.print(f"    URL-ов: {career_urls}")
             console.print(f"    Последнее сканирование: {scan_str}")

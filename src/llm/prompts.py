@@ -286,3 +286,31 @@ RULES:
 
 JSON:
 """
+
+EXTRACT_COMPANY_INFO_PROMPT = """Analyze this company website and extract a brief description.
+
+URL: {url}
+
+===BEGIN_UNTRUSTED_HTML===
+{html}
+===END_UNTRUSTED_HTML===
+
+TASK: Extract a brief description of the company (2-3 sentences).
+
+=== WHAT TO INCLUDE ===
+1. What the company does (main business/products/services)
+2. Industry or sector (IT, consulting, manufacturing, healthcare, etc.)
+3. Any notable characteristics (size, location, specialization)
+
+=== EXAMPLES OF GOOD DESCRIPTIONS ===
+- "IT consulting company specializing in SAP solutions and enterprise software development"
+- "German automotive supplier manufacturing precision components for electric vehicles"  
+- "Digital marketing agency focused on eCommerce and performance advertising"
+- "Fintech startup developing payment solutions for European markets"
+
+=== OUTPUT ===
+
+Return ONLY a brief description (2-3 sentences in English).
+If you cannot determine what the company does, return: UNKNOWN
+"""
+

@@ -213,6 +213,19 @@ class WebsiteSearcher(BaseSearcher):
         sync_result = await self._repository.sync_jobs(site.id, jobs)
         self.last_sync_result = sync_result
         
+        # Extract company info if not yet available
+        if not site.description:
+            try:
+                main_page_url = f"https://{domain}"
+                html = await self._fetch(main_page_url)
+                if html:
+                    description = await self.llm.extract_company_info(html, main_page_url)
+                    if description:
+                        await self._repository.update_site_description(site.id, description)
+                        logger.info(f"Extracted company info for {domain}: {description[:50]}...")
+            except Exception as e:
+                logger.warning(f"Failed to extract company info for {domain}: {e}")
+        
         # Update site scan timestamp
         await self._repository.update_site_scanned(site.id)
         
@@ -529,6 +542,19 @@ class WebsiteSearcher(BaseSearcher):
             # Get or create site
             company_name = self._extract_company_name(f"https://{domain}")
             site = await self._repository.get_or_create_site(domain, company_name)
+            
+            # Extract company info on first scan (when no description yet)
+            if not site.description:
+                try:
+                    main_page_url = f"https://{domain}"
+                    html = await self._fetch(main_page_url)
+                    if html:
+                        description = await self.llm.extract_company_info(html, main_page_url)
+                        if description:
+                            await self._repository.update_site_description(site.id, description)
+                            logger.info(f"Extracted company info for {domain}: {description[:50]}...")
+                except Exception as e:
+                    logger.warning(f"Failed to extract company info for {domain}: {e}")
             
             # Detect platform from URL
             platform = detect_job_board_platform(careers_url)

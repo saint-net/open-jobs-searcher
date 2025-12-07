@@ -75,6 +75,7 @@ class JobRepository:
                 id=row["id"],
                 domain=row["domain"],
                 name=row["name"],
+                description=row["description"] if "description" in row.keys() else None,
                 created_at=self._parse_datetime(row["created_at"]),
                 last_scanned_at=self._parse_datetime(row["last_scanned_at"]),
             )
@@ -127,6 +128,20 @@ class JobRepository:
         await db.execute(
             "UPDATE sites SET last_scanned_at = CURRENT_TIMESTAMP WHERE id = ?",
             (site_id,)
+        )
+        await db.commit()
+    
+    async def update_site_description(self, site_id: int, description: str) -> None:
+        """Update site's description.
+        
+        Args:
+            site_id: Site ID
+            description: Company description from LLM
+        """
+        db = await self._get_connection()
+        await db.execute(
+            "UPDATE sites SET description = ? WHERE id = ?",
+            (description, site_id)
         )
         await db.commit()
     

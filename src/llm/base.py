@@ -295,6 +295,47 @@ class BaseLLMProvider(ABC):
         logger.warning(f"Translation failed, returning original titles")
         return titles
 
+    async def extract_company_info(self, html: str, url: str) -> Optional[str]:
+        """
+        Extract company description from website HTML.
+
+        Args:
+            html: HTML content of the company's main page
+            url: URL of the page
+
+        Returns:
+            Brief company description or None if extraction failed
+        """
+        from .prompts import EXTRACT_COMPANY_INFO_PROMPT
+
+        # Clean and truncate HTML
+        clean_html = self._clean_html(html)
+        html_truncated = clean_html[:40000] if len(clean_html) > 40000 else clean_html
+
+        logger.debug(f"Extracting company info from {url}")
+
+        prompt = EXTRACT_COMPANY_INFO_PROMPT.format(
+            url=url,
+            html=html_truncated,
+        )
+
+        response = await self.complete(prompt)
+        
+        # Clean up response
+        description = response.strip()
+        
+        # Check for failure indicators
+        if not description or description == "UNKNOWN" or len(description) < 10:
+            logger.debug(f"Could not extract company info from {url}")
+            return None
+        
+        # Remove quotes if wrapped
+        if description.startswith('"') and description.endswith('"'):
+            description = description[1:-1]
+        
+        logger.debug(f"Extracted company info: {description[:100]}...")
+        return description
+
     async def extract_jobs(self, html: str, url: str, page=None) -> list[dict]:
         """
         Extract job listings from HTML page using hybrid approach.
@@ -385,6 +426,10 @@ class BaseLLMProvider(ABC):
         for attempt in range(self.MAX_EXTRACTION_RETRIES):
             response = await self.complete(prompt)
             result = self._extract_json(response)
+            
+            # Debug: log raw response if no jobs found
+            if not result or (isinstance(result, dict) and not result.get("jobs")) or (isinstance(result, list) and len(result) == 0):
+                logger.debug(f"LLM response (first 500 chars): {response[:500] if response else 'EMPTY'}")
             
             # Handle new format: {"jobs": [...], "next_page_url": ...}
             if isinstance(result, dict) and "jobs" in result:
@@ -515,6 +560,9 @@ class BaseLLMProvider(ABC):
 
     def _extract_json(self, response: str) -> list | dict:
         """Извлечь JSON из ответа LLM."""
+        if not response or not response.strip():
+            return []
+        
         # Пробуем найти JSON в markdown блоке
         json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response)
         if json_match:
@@ -523,13 +571,40 @@ class BaseLLMProvider(ABC):
             except json.JSONDecodeError:
                 pass
 
-        # Пробуем найти JSON объект с "jobs" ключом (новый формат с пагинацией)
-        object_match = re.search(r'\{[\s\S]*"jobs"[\s\S]*\}', response)
-        if object_match:
-            try:
-                return json.loads(object_match.group(0))
-            except json.JSONDecodeError:
-                pass
+        # Пробуем распарсить весь ответ как JSON (если LLM вернул чистый JSON)
+        try:
+            return json.loads(response.strip())
+        except json.JSONDecodeError:
+            pass
+
+        # Пробуем найти JSON объект с "jobs" ключом
+        # Используем нежадный паттерн для вложенных структур
+        try:
+            # Ищем начало объекта с "jobs"
+            start = response.find('{"jobs"')
+            if start == -1:
+                start = response.find('{ "jobs"')
+            if start == -1:
+                start = response.find('{')
+            
+            if start != -1:
+                # Найдем соответствующую закрывающую скобку
+                depth = 0
+                end = start
+                for i, char in enumerate(response[start:], start):
+                    if char == '{':
+                        depth += 1
+                    elif char == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                
+                if end > start:
+                    json_str = response[start:end]
+                    return json.loads(json_str)
+        except (json.JSONDecodeError, ValueError):
+            pass
 
         # Пробуем найти JSON массив напрямую (старый формат)
         array_match = re.search(r'\[[\s\S]*\]', response)
@@ -539,11 +614,7 @@ class BaseLLMProvider(ABC):
             except json.JSONDecodeError:
                 pass
 
-        # Пробуем распарсить весь ответ
-        try:
-            return json.loads(response)
-        except json.JSONDecodeError:
-            return []
+        return []
 
     async def close(self):
         """Закрыть соединения."""

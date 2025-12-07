@@ -42,8 +42,24 @@ async def init_database(db_path: Path | None = None) -> None:
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(SCHEMA)
         await db.commit()
+        
+        # Run migrations for existing databases
+        await _run_migrations(db)
     
     logger.debug("Database initialized successfully")
+
+
+async def _run_migrations(db) -> None:
+    """Run database migrations for existing databases."""
+    # Migration: Add description column to sites table if it doesn't exist
+    cursor = await db.execute("PRAGMA table_info(sites)")
+    columns = await cursor.fetchall()
+    column_names = [col[1] for col in columns]
+    
+    if "description" not in column_names:
+        logger.debug("Adding 'description' column to sites table")
+        await db.execute("ALTER TABLE sites ADD COLUMN description TEXT")
+        await db.commit()
 
 
 SCHEMA = """
@@ -52,6 +68,7 @@ CREATE TABLE IF NOT EXISTS sites (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     domain TEXT UNIQUE NOT NULL,
     name TEXT,
+    description TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_scanned_at TIMESTAMP
 );
@@ -120,6 +137,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_site_id ON jobs(site_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_is_active ON jobs(is_active);
 CREATE INDEX IF NOT EXISTS idx_job_history_job_id ON job_history(job_id);
 """
+
 
 
 
