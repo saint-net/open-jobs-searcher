@@ -392,7 +392,10 @@ class WebsiteSearcher(BaseSearcher):
                     # Check if we navigated to a different domain (external career site)
                     # or a known external job board platform
                     already_on_job_board = detect_job_board_platform(final_url) is not None
-                    navigated_to_external = urlparse(final_url).netloc != urlparse(variant_url).netloc
+                    # Normalize domains by removing www. prefix for comparison
+                    final_domain = urlparse(final_url).netloc.replace('www.', '')
+                    variant_domain = urlparse(variant_url).netloc.replace('www.', '')
+                    navigated_to_external = final_domain != variant_domain
                     if already_on_job_board or navigated_to_external:
                         if navigated_to_external:
                             logger.debug(f"Navigated to external career site: {final_url}")
@@ -464,11 +467,10 @@ class WebsiteSearcher(BaseSearcher):
                         # Extract jobs with pagination
                         jobs_data = await self._extract_jobs_from_url(variant_url, url)
                     
-                    # Filter jobs if we're on a search results page
-                    jobs_data = self._filter_jobs_by_search_query(jobs_data, variant_url)
-                    
-                    # Filter jobs by source company (for multi-company career portals)
+                    # Filter jobs by source company and search query (for multi-company career portals)
+                    # Only applies to external job boards, not internal navigation
                     if navigated_to_external and jobs_data:
+                        jobs_data = self._filter_jobs_by_search_query(jobs_data, variant_url)
                         jobs_data = self._filter_jobs_by_source_company(jobs_data, url)
                     
                     if jobs_data:

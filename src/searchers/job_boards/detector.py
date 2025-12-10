@@ -5,7 +5,6 @@ import re
 from typing import Optional
 from urllib.parse import urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
@@ -42,38 +41,43 @@ SKIP_URL_PATTERNS = [
 ]
 
 
-def detect_job_board_platform(url: str, html: Optional[str] = None) -> Optional[str]:
-    """Detect job board platform from URL and optionally HTML.
+def detect_job_board_platform(url: str, html: str = None) -> Optional[str]:
+    """Detect job board platform from URL or HTML content.
     
     Args:
         url: URL to check
-        html: Optional HTML content to analyze for platform signatures
+        html: Optional HTML content for additional detection
         
     Returns:
         Platform name or None if not detected
     """
-    # First check URL patterns
+    # First try URL-based detection
     for pattern, platform in EXTERNAL_JOB_BOARDS:
         if re.search(pattern, url, re.IGNORECASE):
             return platform
     
-    # If HTML is provided, check for platform signatures
+    # If HTML provided, try HTML-based detection
     if html:
-        # Check for Talention (SPA - no HTML parser, just detection for logging)
-        if detect_talention_from_html(html):
-            return 'talention'
-        
-        # Check for HRworks (German HR platform, uses custom domains like jobs.company.de)
-        if detect_hrworks_from_html(html):
-            return 'hrworks'
-        
-        # Check for Recruitee (uses custom domains)
-        if detect_recruitee_from_html(html):
-            return 'recruitee'
-            
-        # Check for Odoo (uses meta tag or specialized classes)
-        if detect_odoo_from_html(html):
-            return 'odoo'
+        platform = _detect_platform_from_html(html)
+        if platform:
+            return platform
+    
+    return None
+
+
+def _detect_platform_from_html(html: str) -> Optional[str]:
+    """Detect job board platform from HTML markers.
+    
+    Some platforms (like Talention) don't have distinctive URLs
+    but can be identified by their HTML structure/markers.
+    """
+    # Talention markers
+    if 'talention' in html.lower() or 'data-talention' in html.lower():
+        return 'talention'
+    
+    # HRworks markers  
+    if 'hrworks' in html.lower() or 'data-hrworks' in html.lower():
+        return 'hrworks'
     
     return None
 
@@ -129,153 +133,6 @@ def _normalize_job_board_url(url: str, platform: str = None) -> str:
     lang_param = f"?language={lang_match.group(1)}" if lang_match else ""
     
     return f"{parsed.scheme}://{parsed.netloc}/{lang_param}"
-
-
-def detect_recruitee_from_html(html: str) -> bool:
-    """Detect if a page is powered by Recruitee.
-    
-    Recruitee sites can use custom domains but have telltale signs:
-    - "Hiring with Recruitee" or "recruitee" links in footer
-    - recruiteecdn.com images
-    - careers-analytics.recruitee.com tracking
-    - Specific data attributes or script patterns
-    
-    Args:
-        html: HTML content of the page
-        
-    Returns:
-        True if page is powered by Recruitee
-    """
-    soup = BeautifulSoup(html, 'lxml')
-    
-    # Check for Recruitee footer link
-    for link in soup.find_all('a', href=True):
-        href = link.get('href', '').lower()
-        text = link.get_text(strip=True).lower()
-        if 'recruitee' in href or 'recruitee' in text:
-            logger.debug(f"Detected Recruitee from link: {href or text}")
-            return True
-    
-    # Check for Recruitee CDN images
-    for img in soup.find_all('img', src=True):
-        if 'recruiteecdn.com' in img.get('src', ''):
-            logger.debug("Detected Recruitee from CDN image")
-            return True
-    
-    # Check for Recruitee scripts or tracking
-    for script in soup.find_all('script'):
-        src = script.get('src', '')
-        text = script.string or ''
-        if 'recruitee' in src.lower() or 'recruitee' in text.lower():
-            logger.debug("Detected Recruitee from script")
-            return True
-    
-    # Check raw HTML for recruitee patterns
-    if 'recruitee' in html.lower() or 'recruiteecdn.com' in html.lower():
-        logger.debug("Detected Recruitee from raw HTML")
-        return True
-    
-    return False
-
-
-def detect_talention_from_html(html: str) -> bool:
-    """Detect if a page is powered by Talention.
-    
-    Talention is a German recruitment marketing SaaS platform.
-    It's a pure SPA - jobs are loaded via JavaScript.
-    
-    Detection markers:
-    - CDN: cdn.eu.talention.com
-    - CSS classes: tms-* (Talention Management System)
-    - Scripts: TmsLibrary2, talention_analytics
-    
-    Args:
-        html: HTML content of the page
-        
-    Returns:
-        True if page is powered by Talention
-    """
-    if 'talention.com' in html.lower():
-        logger.debug("Detected Talention from CDN")
-        return True
-    
-    if 'tmslibrary' in html.lower() or 'tms-app' in html.lower():
-        logger.debug("Detected Talention from TMS classes/scripts")
-        return True
-    
-    return False
-
-
-def detect_hrworks_from_html(html: str) -> bool:
-    """Detect if a page is powered by HRworks.
-    
-    HRworks is a German HR/Payroll platform. Detection markers:
-    - CSS classes: bg-blue-hrworks, blue-hrworks
-    - viewClass: HrwMeCustomerJobOffersView, HrwMeDeCustomerJobOffersView
-    - Footer text: "bereitgestellt von HRworks"
-    - CDN: d3d436weoz42qs.cloudfront.net (their asset CDN)
-    - Images: hrworks-production-images.s3-eu-west-1.amazonaws.com
-    
-    Args:
-        html: HTML content of the page
-        
-    Returns:
-        True if page is powered by HRworks
-    """
-    html_lower = html.lower()
-    
-    # Check for HRworks CSS classes
-    if 'hrworks' in html_lower:
-        logger.debug("Detected HRworks from 'hrworks' in HTML")
-        return True
-    
-    # Check for HRworks view classes
-    if 'hrwmecustomerjoboffersview' in html_lower or 'hrwmedecustomerjoboffersview' in html_lower:
-        logger.debug("Detected HRworks from view class")
-        return True
-    
-    # Check for HRworks CDN/images
-    if 'hrworks-production-images' in html:
-        logger.debug("Detected HRworks from S3 images")
-        return True
-    
-    return False
-
-
-def detect_odoo_from_html(html: str) -> bool:
-    """Detect if a page is powered by Odoo.
-    
-    Args:
-        html: HTML content of the page
-        
-    Returns:
-        True if page is powered by Odoo
-    """
-    # 1. Check meta generator (most reliable)
-    # <meta name="generator" content="Odoo">
-    soup = BeautifulSoup(html, 'lxml')
-    generator = soup.find('meta', attrs={'name': 'generator'})
-    if generator:
-        content = generator.get('content', '') or ''
-        if 'odoo' in content.lower():
-            logger.debug("Detected Odoo from meta generator")
-            return True
-            
-    # 2. Check for Odoo class prefixes
-    # o_website_*, oe_website_*, o_hr_recruitment
-    if 'o_website_' in html or 'oe_website_' in html:
-        # Check specific recruitment classes to be sure it's not just a generic Odoo site
-        if 'o_website_hr_recruitment' in html or 'oe_website_jobs' in html:
-            logger.debug("Detected Odoo from HTML classes")
-            return True
-    
-    # 3. Check for Odoo scripts
-    # /web/assets/
-    if '/web/assets/' in html and 'odoo' in html.lower():
-        logger.debug("Detected Odoo from script assets")
-        return True
-        
-    return False
 
 
 def find_external_job_board(html: str) -> Optional[str]:
@@ -372,4 +229,3 @@ def find_external_job_board(html: str) -> Optional[str]:
     normalized_url = _normalize_job_board_url(url, platform)
     logger.info(f"Normalized job board URL: {url} -> {normalized_url}")
     return normalized_url
-

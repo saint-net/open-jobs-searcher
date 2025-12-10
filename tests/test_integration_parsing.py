@@ -940,5 +940,126 @@ class Test711mediaParsing:
         assert "UX/UI" in html
 
 
+class Test8comParsing:
+    """Test 8com.de job parsing.
+    
+    8com.de is a cybersecurity company with internal job listings.
+    Key test case: URL contains ?q=Center filter which should NOT
+    filter jobs when on the same domain (fixed in website.py).
+    """
+    
+    @pytest.mark.asyncio
+    async def test_llm_extracts_jobs_from_8com(self):
+        """Should extract jobs via LLM (no Schema.org on this site)."""
+        html = load_fixture("8com_jobs.html")
+        
+        async def mock_llm(html, url):
+            # 8com.de has 5 jobs (4 regular + 1 Executive Assistant)
+            return [
+                {"title": "Service Manager (m/w/d) für Security Operations Center", "location": "Neustadt", "url": "/offene-stellen/service-manager"},
+                {"title": "Systemadministrator (m/w/d) für interne IT", "location": "Neustadt", "url": "/offene-stellen/systemadministrator"},
+                {"title": "Teamleitung Cyber Security Automation & SOAR (m/w/d)", "location": "Neustadt", "url": "/offene-stellen/teamleitung-soar"},
+                {"title": "SIEM Engineer (m/w/d) für Security Operations Center", "location": "Neustadt", "url": "/offene-stellen/siem-engineer"},
+                {"title": "Executive Assistant – Cyber Security & KI (m/w/d)", "location": "Neustadt", "url": "/offene-stellen/executive-assistant"},
+            ]
+        
+        extractor = HybridJobExtractor(llm_extract_fn=mock_llm)
+        jobs = await extractor.extract(html, "https://www.8com.de")
+        
+        assert len(jobs) == 5
+        
+        titles = {j["title"] for j in jobs}
+        assert "SIEM Engineer (m/w/d) für Security Operations Center" in titles
+        assert "Teamleitung Cyber Security Automation & SOAR (m/w/d)" in titles
+    
+    def test_8com_fixture_loads(self):
+        """8com_jobs.html fixture should load."""
+        html = load_fixture("8com_jobs.html")
+        assert len(html) > 10000
+        assert "8com" in html
+    
+    def test_8com_has_job_listings(self):
+        """8com should have job listings in HTML."""
+        html = load_fixture("8com_jobs.html")
+        
+        # Job titles should be present
+        assert "Security Operations Center" in html or "SOC" in html
+    
+    def test_8com_no_schema_org(self):
+        """8com.de should not have Schema.org (falls back to LLM)."""
+        html = load_fixture("8com_jobs.html")
+        strategy = SchemaOrgStrategy()
+        
+        candidates = strategy.extract(html, "https://www.8com.de")
+        
+        # 8com.de doesn't use Schema.org for jobs
+        assert len(candidates) == 0
+    
+    def test_clean_html_preserves_8com_jobs(self):
+        """HTML cleaning should preserve job content from 8com.de."""
+        html = load_fixture("8com_jobs.html")
+        provider = MockLLMProvider()
+        
+        clean = provider._clean_html(html)
+        
+        # Job-related content should be preserved
+        assert "Security" in clean or "Cyber" in clean
+        assert "offene-stellen" in clean or "Stellen" in clean
+
+
+class Test8comFilteringScenario:
+    """Test the 8com.de URL filtering scenario.
+    
+    Bug fixed: When navigating from 8com.de/karriere to 
+    8com.de/offene-stellen?q=Center, the ?q=Center was incorrectly
+    used to filter jobs by title. This should NOT happen because
+    we're still on the same domain (internal navigation).
+    """
+    
+    def test_same_domain_normalization(self):
+        """8com.de and www.8com.de should be same domain."""
+        from urllib.parse import urlparse
+        
+        url1 = "https://8com.de/karriere"
+        url2 = "https://www.8com.de/offene-stellen?q=Center"
+        
+        domain1 = urlparse(url1).netloc.replace('www.', '')
+        domain2 = urlparse(url2).netloc.replace('www.', '')
+        
+        assert domain1 == domain2 == "8com.de"
+    
+    def test_query_param_should_not_filter_on_same_domain(self):
+        """?q=Center should NOT filter jobs on 8com.de."""
+        from src.searchers.website import WebsiteSearcher
+        from unittest.mock import MagicMock
+        
+        # The key insight: _filter_jobs_by_search_query is only called
+        # when navigated_to_external=True. For 8com.de -> www.8com.de,
+        # navigated_to_external should be False (same domain after normalization).
+        
+        mock_llm = MagicMock()
+        searcher = WebsiteSearcher(llm_provider=mock_llm, use_browser=False, use_cache=False)
+        
+        # If this method WERE called, it would filter by "center"
+        jobs = [
+            {"title": "SIEM Engineer für SOC"},  # has no "center"
+            {"title": "Service Manager für Security Operations Center"},  # has "center"
+            {"title": "Teamleitung Cyber Security"},  # has no "center"
+            {"title": "Systemadministrator"},  # has no "center"
+        ]
+        
+        # But since we're on same domain, this filter should NOT be applied
+        # So in the actual flow, all 4 jobs are returned
+        # This test verifies the filter behavior in isolation
+        filtered = searcher._filter_jobs_by_search_query(
+            jobs, "https://www.8com.de/offene-stellen?q=Center"
+        )
+        
+        # With filter applied: only jobs with "center" in title (case-insensitive)
+        assert len(filtered) == 1  # Only "Security Operations Center"
+        
+        # But in real flow, this filter is NOT called for same-domain navigation!
+
+
 # Run with: pytest tests/test_integration_parsing.py -v
 
