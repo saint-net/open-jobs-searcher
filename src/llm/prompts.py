@@ -162,13 +162,14 @@ Current page: {url}
 
 === YOUR TASK ===
 
-Find the link that leads to ACTUAL job listings.
+Find the link that leads to ACTUAL job listings on a company-owned or company-managed job board.
 
 === WHAT TO LOOK FOR ===
 
 1. **External job board domains** (HIGHEST PRIORITY):
    - *.jobs domains (bmwgroup.jobs, volkswagengroup.jobs, siemens.jobs)
    - greenhouse.io, lever.co, workday.com, successfactors.com, personio.de
+   - recruitee.com, ashbyhq.com, smartrecruiters.com, bamboohr.com
    - jobs.company.com, karriere.company.com
 
 2. **Link text containing**:
@@ -178,17 +179,31 @@ Find the link that leads to ACTUAL job listings.
 3. **URL patterns**:
    - /jobs, /careers, /stellenangebote, /positions
 
+=== IGNORE THESE (NOT job boards!) ===
+
+These are job AGGREGATORS or review sites - NOT company job boards:
+- glassdoor.com, glassdoor.de - job aggregator and review site
+- indeed.com, indeed.de - job aggregator
+- linkedin.com/jobs - job aggregator
+- monster.com, monster.de - job aggregator
+- stepstone.de, stepstone.com - job aggregator
+- xing.com, xing.de - job aggregator
+- kununu.com - company review site (NO jobs)
+- salary.com, payscale.com - salary info (NO jobs)
+
+NEVER return links to these domains!
+
 === PRIORITY ===
 
 1. External *.jobs domains (e.g., bmwgroup.jobs) - BEST
-2. External job platforms (greenhouse, lever, etc.)
+2. External job platforms (greenhouse, lever, personio, etc.)
 3. Subdomain portals (jobs.company.com)
 4. Internal job listing pages
 
 === OUTPUT ===
 
 Return ONLY the full URL (https://...).
-If no job board link found, return: NOT_FOUND
+If no job board link found (or only aggregator links), return: NOT_FOUND
 """
 
 TRANSLATE_JOB_TITLES_PROMPT = """Translate the following job titles to English.
