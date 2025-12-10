@@ -326,5 +326,153 @@ These are all the open positions I could find."""
         assert result == [] or result == {}
 
 
+class TestUiCityParsing:
+    """Test parsing ui.city corporate website jobs.
+    
+    ui.city is a corporate website (not a job board platform) with jobs
+    in navigation menu and job cards on the careers page.
+    Source: https://ui.city/
+    """
+    
+    @pytest.mark.asyncio
+    async def test_llm_extracts_jobs_from_ui_city(self):
+        """Should extract jobs via LLM (no Schema.org on this site)."""
+        html = load_fixture("ui_city_jobs.html")
+        
+        # ui.city doesn't have Schema.org, so LLM would be used
+        async def mock_llm(html, url):
+            return [
+                {"title": "Software Engineer (m/w/d)", "location": "Darmstadt / Remote", "url": "/jobs/software-engineer"},
+                {"title": "DevOps Engineer (m/w/d)", "location": "Berlin / Remote", "url": "/jobs/devops-engineer"},
+                {"title": "Duales Studium Data Science und Künstliche Intelligenz (m/w/d)", "location": "Darmstadt", "url": "/jobs/duales-studium-data-science"},
+                {"title": "Elektromonteur (m/w/d)", "location": "München", "url": "/jobs/elektromonteur"},
+                {"title": "Solution Owner Smart Energy (m/w/d)", "location": "Berlin / Darmstadt", "url": "/jobs/solution-owner-smart-energy"},
+                {"title": "Sales Consultant Smart Regions (m/w/d)", "location": "Deutschland", "url": "/jobs/sales-consultant-smart-regions"},
+                {"title": "Solution Owner Smart Parking (m/w/d)", "location": "Darmstadt", "url": "/jobs/solution-owner-smart-parking"},
+                {"title": "Berater/Beraterin Smart City (m/w/d)", "location": "Berlin / München / Darmstadt", "url": "/jobs/berater-smart-city"},
+                {"title": "Projektmanager Smart City (m/w/d)", "location": "Darmstadt", "url": "/jobs/projektmanager-smart-city"},
+                {"title": "Software Engineer Backend (m/w/d)", "location": "Remote", "url": "/jobs/software-engineer-backend"},
+            ]
+        
+        extractor = HybridJobExtractor(llm_extract_fn=mock_llm)
+        jobs = await extractor.extract(html, "https://ui.city")
+        
+        assert len(jobs) == 10
+        
+        titles = {j["title"] for j in jobs}
+        assert "Software Engineer (m/w/d)" in titles
+        assert "DevOps Engineer (m/w/d)" in titles
+        assert "Elektromonteur (m/w/d)" in titles
+    
+    def test_ui_city_html_has_job_content(self):
+        """Verify the fixture contains expected job content."""
+        html = load_fixture("ui_city_jobs.html")
+        
+        # Check that HTML contains job-related content
+        assert "Software Engineer (m/w/d)" in html
+        assert "DevOps Engineer (m/w/d)" in html
+        assert "Smart City" in html
+        assert "(m/w/d)" in html
+        
+        # Check structure markers
+        assert "job-card" in html
+        assert "job-listings" in html
+    
+    def test_ui_city_no_schema_org(self):
+        """ui.city should not have Schema.org (falls back to LLM)."""
+        html = load_fixture("ui_city_jobs.html")
+        strategy = SchemaOrgStrategy()
+        
+        candidates = strategy.extract(html, "https://ui.city")
+        
+        # No Schema.org data - should return empty
+        assert len(candidates) == 0
+    
+    def test_clean_html_preserves_ui_city_jobs(self):
+        """HTML cleaning should preserve job content from ui.city."""
+        html = load_fixture("ui_city_jobs.html")
+        provider = MockLLMProvider()
+        
+        clean = provider._clean_html(html)
+        
+        # Job titles should be preserved
+        assert "Software Engineer" in clean
+        assert "DevOps Engineer" in clean
+        assert "(m/w/d)" in clean
+        
+        # Job URLs should be preserved
+        assert "/jobs/" in clean
+
+
+class Test1nceParsing:
+    """Test parsing 1nce.com IoT company careers page.
+    
+    1nce.com is an IoT connectivity company with a careers section.
+    Source: https://www.1nce.com/en-eu
+    """
+    
+    @pytest.mark.asyncio
+    async def test_llm_extracts_jobs_from_1nce(self):
+        """Should extract jobs via LLM (no Schema.org on this site)."""
+        html = load_fixture("1nce_jobs.html")
+        
+        async def mock_llm(html, url):
+            return [
+                {"title": "Senior Backend Developer (m/w/d)", "location": "Cologne, Germany / Remote", "url": "/careers/senior-backend-developer"},
+                {"title": "DevOps Engineer (m/w/d)", "location": "Cologne, Germany", "url": "/careers/devops-engineer"},
+                {"title": "Frontend Developer React (m/w/d)", "location": "Remote", "url": "/careers/frontend-developer"},
+                {"title": "QA Engineer (m/w/d)", "location": "Cologne, Germany", "url": "/careers/qa-engineer"},
+                {"title": "Account Executive IoT (m/w/d)", "location": "Munich, Germany", "url": "/careers/account-executive"},
+                {"title": "Sales Manager APAC (m/w/d)", "location": "Singapore", "url": "/careers/sales-manager-apac"},
+                {"title": "Product Manager IoT Platform (m/w/d)", "location": "Cologne, Germany", "url": "/careers/product-manager"},
+                {"title": "Customer Success Manager (m/w/d)", "location": "Cologne, Germany / Remote", "url": "/careers/customer-success-manager"},
+            ]
+        
+        extractor = HybridJobExtractor(llm_extract_fn=mock_llm)
+        jobs = await extractor.extract(html, "https://www.1nce.com")
+        
+        assert len(jobs) == 8
+        
+        titles = {j["title"] for j in jobs}
+        assert "Senior Backend Developer (m/w/d)" in titles
+        assert "DevOps Engineer (m/w/d)" in titles
+        assert "Product Manager IoT Platform (m/w/d)" in titles
+    
+    def test_1nce_html_has_job_content(self):
+        """Verify the fixture contains expected job content."""
+        html = load_fixture("1nce_jobs.html")
+        
+        # Check job-related content
+        assert "Senior Backend Developer" in html
+        assert "DevOps Engineer" in html
+        assert "IoT" in html
+        assert "(m/w/d)" in html
+        
+        # Check structure
+        assert "job-posting" in html
+        assert "careers-section" in html
+    
+    def test_1nce_no_schema_org(self):
+        """1nce.com should not have Schema.org (falls back to LLM)."""
+        html = load_fixture("1nce_jobs.html")
+        strategy = SchemaOrgStrategy()
+        
+        candidates = strategy.extract(html, "https://www.1nce.com")
+        
+        assert len(candidates) == 0
+    
+    def test_clean_html_preserves_1nce_jobs(self):
+        """HTML cleaning should preserve job content from 1nce."""
+        html = load_fixture("1nce_jobs.html")
+        provider = MockLLMProvider()
+        
+        clean = provider._clean_html(html)
+        
+        assert "Backend Developer" in clean
+        assert "DevOps Engineer" in clean
+        assert "(m/w/d)" in clean
+        assert "/careers/" in clean
+
+
 # Run with: pytest tests/test_integration_parsing.py -v
 
