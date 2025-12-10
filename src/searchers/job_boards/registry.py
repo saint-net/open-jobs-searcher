@@ -62,7 +62,7 @@ class JobBoardParserRegistry:
             return []
         
         soup = BeautifulSoup(html, 'lxml')
-        jobs = parser.parse(soup, base_url)
+        jobs = parser.parse_and_filter(soup, base_url)
         
         if jobs:
             logger.info(f"Parsed {len(jobs)} jobs from {platform} directly")

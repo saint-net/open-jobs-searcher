@@ -8,12 +8,12 @@
 |-----|------|----------|
 | Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (95 тестов) |
 | Integration | `test_integration_*.py` | Проверка парсинга с реальным HTML (28 тестов) |
-| Job Boards | `test_job_board_parsers.py` | Тесты парсеров платформ (34 теста) |
+| Job Boards | `test_job_board_parsers.py` | Тесты парсеров платформ (39 тестов) |
 
 ## Запуск тестов
 
 ```bash
-# ВСЕ тесты (157 штук, ~1 сек)
+# ВСЕ тесты (162 штуки, ~1 сек)
 python -m pytest tests/ -v
 
 # Только smoke тесты (быстро)

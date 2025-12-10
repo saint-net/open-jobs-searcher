@@ -366,5 +366,67 @@ class TestParserEmptyInput:
         assert jobs == []
 
 
+class TestNonJobFiltering:
+    """Tests for filtering non-job entries (Initiativbewerbung, etc.)."""
+    
+    def test_filters_initiativbewerbung(self):
+        """Should filter out Initiativbewerbung entries."""
+        parser = PersonioParser()
+        assert parser._is_non_job_entry("Initiativbewerbung (d/m/w)") is True
+        assert parser._is_non_job_entry("Initiativ Bewerbung") is True
+    
+    def test_filters_open_application(self):
+        """Should filter out Open Application entries."""
+        parser = LeverParser()
+        assert parser._is_non_job_entry("Open Application") is True
+        assert parser._is_non_job_entry("Unsolicited Application") is True
+        assert parser._is_non_job_entry("Speculative Application") is True
+        assert parser._is_non_job_entry("General Application") is True
+    
+    def test_filters_spontanbewerbung(self):
+        """Should filter out Spontanbewerbung entries."""
+        parser = GreenhouseParser()
+        assert parser._is_non_job_entry("Spontanbewerbung") is True
+        assert parser._is_non_job_entry("Blindbewerbung") is True
+    
+    def test_keeps_real_jobs(self):
+        """Should keep real job titles."""
+        parser = PersonioParser()
+        assert parser._is_non_job_entry("Software Engineer (m/w/d)") is False
+        assert parser._is_non_job_entry("Senior Developer") is False
+        assert parser._is_non_job_entry("Product Manager") is False
+    
+    def test_parse_and_filter_removes_non_jobs(self):
+        """parse_and_filter() should remove non-job entries."""
+        html = """
+        <div class="positions-list">
+            <a href="/job/123" class="job-position">
+                <span class="job-position__title">Software Engineer (m/w/d)</span>
+            </a>
+            <a href="/job/124" class="job-position">
+                <span class="job-position__title">Initiativbewerbung (d/m/w)</span>
+            </a>
+            <a href="/job/125" class="job-position">
+                <span class="job-position__title">DevOps Engineer (m/w/d)</span>
+            </a>
+        </div>
+        """
+        soup = make_soup(html)
+        parser = PersonioParser()
+        
+        # parse() returns all including Initiativbewerbung
+        all_jobs = parser.parse(soup, "https://example.personio.de")
+        assert len(all_jobs) == 3
+        
+        # parse_and_filter() removes Initiativbewerbung
+        filtered_jobs = parser.parse_and_filter(soup, "https://example.personio.de")
+        assert len(filtered_jobs) == 2
+        
+        titles = {j["title"] for j in filtered_jobs}
+        assert "Initiativbewerbung (d/m/w)" not in titles
+        assert "Software Engineer (m/w/d)" in titles
+        assert "DevOps Engineer (m/w/d)" in titles
+
+
 # Run with: pytest tests/test_job_board_parsers.py -v
 
