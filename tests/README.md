@@ -57,16 +57,20 @@ tests/
 ├── __init__.py
 ├── conftest.py                    # Общие фикстуры
 ├── fixtures/                      # Тестовые HTML файлы
-│   ├── schema_org_jobs.html       # Schema.org JSON-LD
-│   ├── greenhouse_style.html      # Greenhouse-style layout
+│   │
+│   │  # Job Board платформы (специализированные парсеры)
+│   ├── greenhouse_style.html      # Greenhouse job board
 │   ├── lever_jobs.html            # Lever job board
 │   ├── personio_jobs.html         # Personio job board
 │   ├── recruitee_jobs.html        # Recruitee (embedded JSON)
 │   ├── workable_jobs.html         # Workable (JSON-LD)
-│   ├── odoo_jobs.html             # Odoo CMS page
-│   ├── ui_city_jobs.html          # ui.city corporate site
-│   ├── 1nce_jobs.html             # 1nce.com IoT company
-│   └── 3p_services_jobs.html      # 3p-services.com pipeline inspection
+│   ├── odoo_jobs.html             # Odoo CMS
+│   │
+│   │  # Custom sites (LLM extraction)
+│   ├── schema_org_jobs.html       # Schema.org JSON-LD (custom site)
+│   ├── ui_city_jobs.html          # ui.city - Custom site (Smart City)
+│   ├── 1nce_jobs.html             # 1nce.com - Custom site (IoT)
+│   └── 3p_services_jobs.html      # 3p-services.com - Custom site (Pipeline)
 ├── test_smoke_llm_base.py         # LLM: clean_html, extract_json
 ├── test_smoke_prompts.py          # Промпты: форматирование
 ├── test_smoke_browser.py          # Браузер: BrowserLoader

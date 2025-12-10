@@ -327,10 +327,10 @@ These are all the open positions I could find."""
 
 
 class TestUiCityParsing:
-    """Test parsing ui.city corporate website jobs.
+    """Test parsing ui.city - Custom site (Smart City company).
     
-    ui.city is a corporate website (not a job board platform) with jobs
-    in navigation menu and job cards on the careers page.
+    ui.city is a custom corporate website (not a job board platform).
+    Uses LLM extraction - no specialized parser.
     Source: https://ui.city/
     """
     
@@ -405,9 +405,10 @@ class TestUiCityParsing:
 
 
 class Test1nceParsing:
-    """Test parsing 1nce.com IoT company careers page.
+    """Test parsing 1nce.com - Custom site (IoT connectivity).
     
-    1nce.com is an IoT connectivity company with a careers section.
+    1nce.com is a custom corporate website (not a job board platform).
+    Uses LLM extraction - no specialized parser.
     Source: https://www.1nce.com/en-eu
     """
     
@@ -475,9 +476,10 @@ class Test1nceParsing:
 
 
 class Test3pServicesParsing:
-    """Test parsing 3p-services.com pipeline inspection company.
+    """Test parsing 3p-services.com - Custom site (Pipeline inspection).
     
-    3P Services is a German pipeline inspection company with custom careers page.
+    3P Services is a custom corporate website (not a job board platform).
+    Uses LLM extraction - no specialized parser.
     Source: https://www.3p-services.com/career/jobs/
     """
     
