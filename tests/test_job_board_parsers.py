@@ -16,6 +16,7 @@ from src.searchers.job_boards.recruitee import RecruiteeParser
 from src.searchers.job_boards.workable import WorkableParser
 from src.searchers.job_boards.greenhouse import GreenhouseParser
 from src.searchers.job_boards.odoo import OdooParser
+from src.searchers.job_boards.hrworks import HRworksParser
 
 
 # Path to fixtures
@@ -310,6 +311,117 @@ class TestOdooParser:
         assert all("/jobs/detail/" in j["url"] for j in jobs)
 
 
+class TestTalentionDetection:
+    """Tests for Talention platform detection.
+    
+    Talention is a pure SPA - jobs are loaded via JavaScript.
+    We only detect the platform, no HTML parsing possible.
+    """
+    
+    def test_detects_talention_platform(self):
+        """Should detect Talention from HTML markers."""
+        from src.searchers.job_boards.detector import detect_job_board_platform
+        
+        html = load_fixture("talention_jobs.html")
+        platform = detect_job_board_platform("https://jobs.4u-at-work.de/jobs", html)
+        
+        assert platform == "talention"
+    
+    def test_talention_has_no_static_jobs(self):
+        """Talention SPA has no jobs in static HTML (expected behavior).
+        
+        Jobs are loaded dynamically via JavaScript, so static HTML
+        parsing won't find any jobs. This is expected.
+        """
+        html = load_fixture("talention_jobs.html")
+        soup = make_soup(html)
+        
+        # No job links in static HTML (SPA loads them via JS)
+        job_links = [a for a in soup.find_all('a', href=True) 
+                     if '/stellenangebote/' in a.get('href', '') 
+                     and '/bewerbung' not in a.get('href', '')]
+        
+        # Only initiativ bewerbung link exists, no actual job listings
+        assert len(job_links) == 0
+
+
+class TestHRworksParser:
+    """Tests for HRworks job board parser."""
+    
+    def test_extracts_all_jobs(self):
+        """Should extract all jobs from HRworks HTML."""
+        html = load_fixture("hrworks_jobs.html")
+        soup = make_soup(html)
+        parser = HRworksParser()
+        
+        jobs = parser.parse(soup, "https://jobs.4sellers.de/de")
+        
+        # Should have 4 jobs (before filtering)
+        assert len(jobs) == 4
+    
+    def test_extracts_titles(self):
+        """Should extract job titles from h2 elements."""
+        html = load_fixture("hrworks_jobs.html")
+        soup = make_soup(html)
+        parser = HRworksParser()
+        
+        jobs = parser.parse(soup, "https://jobs.4sellers.de/de")
+        titles = {j["title"] for j in jobs}
+        
+        assert "Berufsorientierung" in titles
+        assert "Initiativbewerbung" in titles
+        assert any("Küchenprofi" in t for t in titles)
+        assert any("Finanzbuchhaltung" in t for t in titles)
+    
+    def test_extracts_locations(self):
+        """Should extract locations from icomoon-location elements."""
+        html = load_fixture("hrworks_jobs.html")
+        soup = make_soup(html)
+        parser = HRworksParser()
+        
+        jobs = parser.parse(soup, "https://jobs.4sellers.de/de")
+        
+        beruf_job = next(j for j in jobs if "Berufsorientierung" in j["title"])
+        assert "Rain" in beruf_job["location"] or "Deutschland" in beruf_job["location"]
+    
+    def test_extracts_departments(self):
+        """Should extract department from metadata div."""
+        html = load_fixture("hrworks_jobs.html")
+        soup = make_soup(html)
+        parser = HRworksParser()
+        
+        jobs = parser.parse(soup, "https://jobs.4sellers.de/de")
+        
+        beruf_job = next(j for j in jobs if "Berufsorientierung" in j["title"])
+        assert beruf_job["department"] == "IT und Software-Entwicklung"
+    
+    def test_extracts_urls(self):
+        """Should extract job URLs with id parameter."""
+        html = load_fixture("hrworks_jobs.html")
+        soup = make_soup(html)
+        parser = HRworksParser()
+        
+        jobs = parser.parse(soup, "https://jobs.4sellers.de/de")
+        
+        assert all("?id=" in j["url"] for j in jobs)
+        assert all(j["url"].startswith("https://jobs.4sellers.de/") for j in jobs)
+    
+    def test_parse_and_filter_removes_initiativbewerbung(self):
+        """Should filter out Initiativbewerbung when using parse_and_filter."""
+        html = load_fixture("hrworks_jobs.html")
+        soup = make_soup(html)
+        parser = HRworksParser()
+        
+        # Raw parse includes Initiativbewerbung
+        all_jobs = parser.parse(soup, "https://jobs.4sellers.de/de")
+        assert any("Initiativbewerbung" in j["title"] for j in all_jobs)
+        
+        # Filtered parse removes it
+        filtered_jobs = parser.parse_and_filter(soup, "https://jobs.4sellers.de/de")
+        assert not any("Initiativbewerbung" in j["title"] for j in filtered_jobs)
+        assert len(filtered_jobs) == 3
+
+
 class TestParserPlatformNames:
     """Test that all parsers have correct platform names."""
     
@@ -330,6 +442,9 @@ class TestParserPlatformNames:
     
     def test_odoo_platform_name(self):
         assert OdooParser().platform_name == "odoo"
+    
+    def test_hrworks_platform_name(self):
+        assert HRworksParser().platform_name == "hrworks"
 
 
 class TestParserEmptyInput:
@@ -363,6 +478,11 @@ class TestParserEmptyInput:
     def test_odoo_empty_html(self):
         soup = make_soup("<html><body></body></html>")
         jobs = OdooParser().parse(soup, "https://example.com")
+        assert jobs == []
+    
+    def test_hrworks_empty_html(self):
+        soup = make_soup("<html><body></body></html>")
+        jobs = HRworksParser().parse(soup, "https://example.com")
         assert jobs == []
 
 

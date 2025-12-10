@@ -59,6 +59,14 @@ def detect_job_board_platform(url: str, html: Optional[str] = None) -> Optional[
     
     # If HTML is provided, check for platform signatures
     if html:
+        # Check for Talention (SPA - no HTML parser, just detection for logging)
+        if detect_talention_from_html(html):
+            return 'talention'
+        
+        # Check for HRworks (German HR platform, uses custom domains like jobs.company.de)
+        if detect_hrworks_from_html(html):
+            return 'hrworks'
+        
         # Check for Recruitee (uses custom domains)
         if detect_recruitee_from_html(html):
             return 'recruitee'
@@ -165,6 +173,70 @@ def detect_recruitee_from_html(html: str) -> bool:
     # Check raw HTML for recruitee patterns
     if 'recruitee' in html.lower() or 'recruiteecdn.com' in html.lower():
         logger.debug("Detected Recruitee from raw HTML")
+        return True
+    
+    return False
+
+
+def detect_talention_from_html(html: str) -> bool:
+    """Detect if a page is powered by Talention.
+    
+    Talention is a German recruitment marketing SaaS platform.
+    It's a pure SPA - jobs are loaded via JavaScript.
+    
+    Detection markers:
+    - CDN: cdn.eu.talention.com
+    - CSS classes: tms-* (Talention Management System)
+    - Scripts: TmsLibrary2, talention_analytics
+    
+    Args:
+        html: HTML content of the page
+        
+    Returns:
+        True if page is powered by Talention
+    """
+    if 'talention.com' in html.lower():
+        logger.debug("Detected Talention from CDN")
+        return True
+    
+    if 'tmslibrary' in html.lower() or 'tms-app' in html.lower():
+        logger.debug("Detected Talention from TMS classes/scripts")
+        return True
+    
+    return False
+
+
+def detect_hrworks_from_html(html: str) -> bool:
+    """Detect if a page is powered by HRworks.
+    
+    HRworks is a German HR/Payroll platform. Detection markers:
+    - CSS classes: bg-blue-hrworks, blue-hrworks
+    - viewClass: HrwMeCustomerJobOffersView, HrwMeDeCustomerJobOffersView
+    - Footer text: "bereitgestellt von HRworks"
+    - CDN: d3d436weoz42qs.cloudfront.net (their asset CDN)
+    - Images: hrworks-production-images.s3-eu-west-1.amazonaws.com
+    
+    Args:
+        html: HTML content of the page
+        
+    Returns:
+        True if page is powered by HRworks
+    """
+    html_lower = html.lower()
+    
+    # Check for HRworks CSS classes
+    if 'hrworks' in html_lower:
+        logger.debug("Detected HRworks from 'hrworks' in HTML")
+        return True
+    
+    # Check for HRworks view classes
+    if 'hrwmecustomerjoboffersview' in html_lower or 'hrwmedecustomerjoboffersview' in html_lower:
+        logger.debug("Detected HRworks from view class")
+        return True
+    
+    # Check for HRworks CDN/images
+    if 'hrworks-production-images' in html:
+        logger.debug("Detected HRworks from S3 images")
         return True
     
     return False
