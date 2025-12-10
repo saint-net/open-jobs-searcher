@@ -131,6 +131,172 @@ class SchemaOrgStrategy(BaseExtractionStrategy):
         )
 
 
+class PdfLinkStrategy(BaseExtractionStrategy):
+    """Extract jobs from PDF/document links by parsing filename patterns.
+    
+    Many German company websites (especially SMEs) display job listings as PDF flyers.
+    These are often links like:
+    - stellenausschreibung_IT-Systemadministrator.pdf
+    - 4pipes_Stellenausschreibung_Vertriebsmitarbeiter-Innendienst_20251027.pdf
+    
+    This strategy extracts job titles from such filenames.
+    """
+    
+    name = "pdf_link"
+    source = ExtractionSource.PDF_LINK
+    
+    # File extensions that might contain job postings
+    JOB_FILE_EXTENSIONS = {'.pdf', '.doc', '.docx'}
+    
+    # Keywords in filename that indicate a job posting (German + English)
+    JOB_FILENAME_KEYWORDS = {
+        'stellenausschreibung', 'stellenangebot', 'stellenanzeige',
+        'jobausschreibung', 'jobangebot', 'jobanzeige',
+        'karriere', 'career', 'vacancy', 'position',
+        'job_posting', 'job-posting', 'jobposting',
+    }
+    
+    # Words to strip from extracted titles
+    STRIP_WORDS = {
+        'stellenausschreibung', 'stellenangebot', 'stellenanzeige',
+        'jobausschreibung', 'jobangebot', 'jobanzeige',
+        'karriere', 'career', 'vacancy', 'position',
+        'job', 'posting', 'job_posting', 'jobposting',
+    }
+    
+    def extract(self, html: str, url: str) -> list[JobCandidate]:
+        """Extract jobs from PDF links in HTML."""
+        soup = BeautifulSoup(html, 'lxml')
+        candidates = []
+        seen_titles = set()
+        
+        for link in soup.find_all('a', href=True):
+            href = link.get('href', '')
+            if not href:
+                continue
+            
+            # Check if it's a document link
+            href_lower = href.lower()
+            if not any(href_lower.endswith(ext) for ext in self.JOB_FILE_EXTENSIONS):
+                continue
+            
+            # Check if filename contains job-related keywords
+            filename = href.split('/')[-1]
+            filename_lower = filename.lower()
+            
+            if not any(kw in filename_lower for kw in self.JOB_FILENAME_KEYWORDS):
+                continue
+            
+            # Extract job title from filename
+            title = self._extract_title_from_filename(filename)
+            if not title:
+                continue
+            
+            # Deduplicate
+            normalized = title.lower()
+            if normalized in seen_titles:
+                continue
+            seen_titles.add(normalized)
+            
+            # Build full URL
+            job_url = urljoin(url, href)
+            
+            candidates.append(JobCandidate(
+                title=title,
+                url=job_url,
+                source=self.source,
+                signals={
+                    "from_pdf_link": True,
+                    "filename": filename,
+                },
+            ))
+        
+        logger.debug(f"PdfLinkStrategy found {len(candidates)} candidates")
+        return candidates
+    
+    def _extract_title_from_filename(self, filename: str) -> str:
+        """Extract job title from PDF filename.
+        
+        Examples:
+            4pipes_Stellenausschreibung_Vertriebsmitarbeiter-Innendienst_20251027.pdf
+            -> Vertriebsmitarbeiter Innendienst
+            
+            stellenausschreibung_it-systemadministrator_v2_20251027.pdf
+            -> IT-Systemadministrator
+        """
+        # Remove extension
+        name = filename.rsplit('.', 1)[0]
+        
+        # Replace underscores and hyphens with spaces (but keep hyphens in compound words)
+        # First, protect compound words by marking internal hyphens
+        name = re.sub(r'([a-zA-ZäöüÄÖÜß])-([a-zA-ZäöüÄÖÜß])', r'\1§HYPHEN§\2', name)
+        # Now replace underscores and remaining hyphens with spaces
+        name = name.replace('_', ' ').replace('-', ' ')
+        # Restore protected hyphens
+        name = name.replace('§HYPHEN§', '-')
+        
+        # Split into parts
+        parts = name.split()
+        
+        # Remove known strip words and filter
+        filtered_parts = []
+        for part in parts:
+            # Skip dates (8 digits like 20251027)
+            if re.match(r'^\d{6,8}$', part):
+                continue
+            # Skip version numbers (v1, v2, etc.)
+            if re.match(r'^v\d+$', part.lower()):
+                continue
+            # Skip company prefixes (like "4pipes")
+            if re.match(r'^\d+[a-zA-Z]+$', part):
+                continue
+            # Skip strip words
+            if part.lower() in self.STRIP_WORDS:
+                continue
+            # Skip very short parts (like "ah" for initials)
+            if len(part) <= 2 and part.lower() not in {'it', 'hr', 'qa', 'pr', 'vp'}:
+                continue
+            
+            filtered_parts.append(part)
+        
+        if not filtered_parts:
+            return ""
+        
+        # Known acronyms that should be uppercase
+        known_acronyms = {'it', 'hr', 'qa', 'pr', 'vp', 'ceo', 'cto', 'cfo', 'sap', 'erp', 'crm'}
+        
+        # Capitalize each part properly
+        capitalized_parts = []
+        for part in filtered_parts:
+            # Keep known acronyms uppercase
+            if part.lower() in known_acronyms:
+                capitalized_parts.append(part.upper())
+            # Keep already-uppercase acronyms (like IT, HR)
+            elif part.upper() == part and len(part) <= 4:
+                capitalized_parts.append(part.upper())
+            # Handle compound words with hyphens (Vertriebsmitarbeiter-Innendienst)
+            elif '-' in part:
+                subparts = part.split('-')
+                capitalized_subparts = []
+                for s in subparts:
+                    if s.lower() in known_acronyms:
+                        capitalized_subparts.append(s.upper())
+                    elif s.upper() == s and len(s) <= 4:
+                        capitalized_subparts.append(s.upper())
+                    else:
+                        capitalized_subparts.append(s.capitalize())
+                capitalized_parts.append('-'.join(capitalized_subparts))
+            else:
+                capitalized_parts.append(part.capitalize())
+        
+        title = ' '.join(capitalized_parts)
+        
+        # Clean up multiple spaces
+        title = re.sub(r'\s+', ' ', title).strip()
+        
+        return title
+
+
 class GenderNotationStrategy(BaseExtractionStrategy):
     """Extract jobs by finding (m/w/d) gender notation patterns."""
     

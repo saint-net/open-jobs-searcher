@@ -9,6 +9,7 @@ import re
 class ExtractionSource(Enum):
     """Source of job extraction."""
     SCHEMA_ORG = "schema_org"          # schema.org/JobPosting - highest confidence
+    PDF_LINK = "pdf_link"              # Job from PDF/document link filename
     ACCESSIBILITY = "accessibility"     # Browser accessibility tree - high confidence
     GENDER_NOTATION = "gender_notation" # (m/w/d) pattern
     LIST_STRUCTURE = "list_structure"   # Detected from repeated HTML structure
@@ -19,6 +20,7 @@ class ExtractionSource(Enum):
 # Base confidence scores by source
 SOURCE_CONFIDENCE = {
     ExtractionSource.SCHEMA_ORG: 0.95,
+    ExtractionSource.PDF_LINK: 0.90,  # High confidence - explicit job document links
     ExtractionSource.ACCESSIBILITY: 0.90,  # High confidence - clean text from browser
     ExtractionSource.GENDER_NOTATION: 0.85,
     ExtractionSource.LIST_STRUCTURE: 0.60,

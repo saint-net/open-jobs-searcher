@@ -428,5 +428,94 @@ class TestNonJobFiltering:
         assert "DevOps Engineer (m/w/d)" in titles
 
 
+class TestPdfLinkStrategy:
+    """Tests for PDF link job extraction strategy."""
+    
+    def test_extracts_jobs_from_pdf_links(self):
+        """Should extract jobs from PDF document links."""
+        from src.extraction.strategies import PdfLinkStrategy
+        
+        html = load_fixture("pdf_links_jobs.html")
+        strategy = PdfLinkStrategy()
+        
+        candidates = strategy.extract(html, "https://example.com/jobs")
+        
+        # Should find 4 job PDFs (not the product brochure, AGB, or datenschutz)
+        assert len(candidates) == 4
+    
+    def test_extracts_titles_correctly(self):
+        """Should extract job titles from PDF filenames."""
+        from src.extraction.strategies import PdfLinkStrategy
+        
+        html = load_fixture("pdf_links_jobs.html")
+        strategy = PdfLinkStrategy()
+        
+        candidates = strategy.extract(html, "https://example.com/jobs")
+        titles = {c.title for c in candidates}
+        
+        assert "IT-Systemadministrator" in titles
+        assert "Vertriebsmitarbeiter-Innendienst" in titles
+        # Check that Senior-Developer is in one of the titles
+        assert any("Senior-Developer" in t for t in titles)
+        assert any("Projektmanager" in t for t in titles)
+    
+    def test_builds_full_urls(self):
+        """Should build full URLs from relative paths."""
+        from src.extraction.strategies import PdfLinkStrategy
+        
+        html = load_fixture("pdf_links_jobs.html")
+        strategy = PdfLinkStrategy()
+        
+        candidates = strategy.extract(html, "https://example.com/jobs")
+        
+        # All URLs should be absolute
+        for c in candidates:
+            assert c.url.startswith("https://example.com/")
+            assert c.url.endswith(".pdf")
+    
+    def test_ignores_non_job_pdfs(self):
+        """Should not extract PDFs without job-related keywords."""
+        from src.extraction.strategies import PdfLinkStrategy
+        
+        html = load_fixture("pdf_links_jobs.html")
+        strategy = PdfLinkStrategy()
+        
+        candidates = strategy.extract(html, "https://example.com/jobs")
+        titles = {c.title.lower() for c in candidates}
+        
+        # These should not be extracted
+        assert not any("brochure" in t for t in titles)
+        assert not any("agb" in t for t in titles)
+        assert not any("datenschutz" in t for t in titles)
+    
+    def test_capitalizes_acronyms(self):
+        """Should properly capitalize known acronyms like IT, HR."""
+        from src.extraction.strategies import PdfLinkStrategy
+        
+        strategy = PdfLinkStrategy()
+        
+        # Direct test of _extract_title_from_filename
+        title = strategy._extract_title_from_filename("stellenausschreibung_it-systemadministrator_v2_20251027.pdf")
+        assert "IT-" in title  # IT should be uppercase
+    
+    def test_deduplicates_jobs(self):
+        """Should not return duplicate job titles."""
+        from src.extraction.strategies import PdfLinkStrategy
+        
+        html = '''
+        <html><body>
+            <a href="job_stellenausschreibung_developer.pdf">Dev</a>
+            <a href="karriere_developer.pdf">Dev2</a>
+        </body></html>
+        '''
+        strategy = PdfLinkStrategy()
+        
+        candidates = strategy.extract(html, "https://example.com")
+        titles = [c.title.lower() for c in candidates]
+        
+        # Should deduplicate "developer"
+        assert titles.count("developer") == 1
+
+
 # Run with: pytest tests/test_job_board_parsers.py -v
 

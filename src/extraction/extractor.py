@@ -12,7 +12,7 @@ import logging
 from typing import Optional, Callable, Awaitable, Any
 
 from .candidate import JobCandidate, ExtractionSource
-from .strategies import SchemaOrgStrategy
+from .strategies import SchemaOrgStrategy, PdfLinkStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,9 @@ class HybridJobExtractor:
         """
         self.llm_extract_fn = llm_extract_fn
         
-        # Schema.org is the only heuristic strategy (100% accuracy)
+        # High-accuracy strategies (use before LLM)
         self.schema_strategy = SchemaOrgStrategy()
+        self.pdf_link_strategy = PdfLinkStrategy()
     
     async def extract(self, html: str, url: str, page: Any = None) -> list[dict]:
         """
@@ -61,11 +62,21 @@ class HybridJobExtractor:
             if schema_candidates:
                 logger.debug(f"Schema.org found {len(schema_candidates)} jobs, using these")
                 return self._finalize(schema_candidates)
-            logger.debug("Schema.org found 0 jobs, falling back to LLM")
+            logger.debug("Schema.org found 0 jobs")
         except Exception as e:
             logger.warning(f"SchemaOrgStrategy failed: {e}")
         
-        # 2. No Schema.org data -> use LLM as main extraction method
+        # 2. Try PDF link extraction (job postings as PDF flyers)
+        try:
+            pdf_candidates = self.pdf_link_strategy.extract(html, url)
+            if pdf_candidates:
+                logger.debug(f"PdfLinkStrategy found {len(pdf_candidates)} jobs")
+                return self._finalize(pdf_candidates)
+            logger.debug("PdfLinkStrategy found 0 jobs")
+        except Exception as e:
+            logger.warning(f"PdfLinkStrategy failed: {e}")
+        
+        # 3. No structured data -> use LLM as main extraction method
         llm_jobs = await self._llm_extract(html, url)
         if llm_jobs:
             llm_candidates = self._convert_llm_jobs(llm_jobs)

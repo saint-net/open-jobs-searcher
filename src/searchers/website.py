@@ -20,6 +20,7 @@ from src.llm.base import BaseLLMProvider
 from src.browser import DomainUnreachableError, PlaywrightBrowsersNotInstalledError
 from src.database import JobRepository
 from src.database.models import SyncResult
+from src.extraction.strategies import PdfLinkStrategy, SchemaOrgStrategy
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -842,10 +843,23 @@ class WebsiteSearcher(BaseSearcher):
                     jobs_data = self.job_board_parsers.parse(html, final_url, external_platform)
                 # No pagination for external platforms (they handle it themselves)
             else:
-                # Use LLM extraction with pagination support
-                result = await self.llm.extract_jobs_with_pagination(html, final_url)
-                jobs_data = result.get("jobs", [])
-                next_page_url = result.get("next_page_url")
+                # Try high-accuracy strategies first (Schema.org, PDF links)
+                schema_strategy = SchemaOrgStrategy()
+                schema_candidates = schema_strategy.extract(html, final_url)
+                if schema_candidates:
+                    jobs_data = [c.to_dict() for c in schema_candidates]
+                    logger.debug(f"Schema.org extracted {len(jobs_data)} jobs")
+                else:
+                    pdf_strategy = PdfLinkStrategy()
+                    pdf_candidates = pdf_strategy.extract(html, final_url)
+                    if pdf_candidates:
+                        jobs_data = [c.to_dict() for c in pdf_candidates]
+                        logger.debug(f"PdfLinkStrategy extracted {len(jobs_data)} jobs")
+                    else:
+                        # Use LLM extraction with pagination support
+                        result = await self.llm.extract_jobs_with_pagination(html, final_url)
+                        jobs_data = result.get("jobs", [])
+                        next_page_url = result.get("next_page_url")
             
             logger.debug(f"Extracted {len(jobs_data)} jobs from {final_url}")
             return jobs_data, next_page_url
