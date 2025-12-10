@@ -1,11 +1,13 @@
 """Конфигурация приложения."""
 
-from pydantic_settings import BaseSettings
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Настройки приложения."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     # Поиск
     default_location: str = Field(default="Moscow", description="Локация по умолчанию")
@@ -23,7 +25,7 @@ class Settings(BaseSettings):
     ollama_url: str = Field(
         default="http://localhost:11434", description="URL Ollama сервера"
     )
-    
+
     # OpenRouter provider routing
     # Доступные провайдеры для gpt-oss-120b: chutes, siliconflow, novitaai, gmicloud, deepinfra, ncompass
     openrouter_provider: str = Field(
@@ -38,10 +40,6 @@ class Settings(BaseSettings):
 
     # OpenRouter
     openrouter_api_key: str = Field(default="", description="OpenRouter API ключ")
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 settings = Settings()
