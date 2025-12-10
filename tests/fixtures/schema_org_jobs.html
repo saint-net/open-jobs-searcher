@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Karriere - Example GmbH</title>
+    <script type="application/ld+json">
+    [
+        {
+            "@context": "https://schema.org",
+            "@type": "JobPosting",
+            "title": "Senior Software Developer (m/w/d)",
+            "url": "https://example.com/jobs/senior-dev",
+            "datePosted": "2024-01-15",
+            "jobLocation": {
+                "@type": "Place",
+                "address": {
+                    "@type": "PostalAddress",
+                    "addressLocality": "Berlin",
+                    "addressCountry": "DE"
+                }
+            },
+            "hiringOrganization": {
+                "@type": "Organization",
+                "name": "Example GmbH"
+            },
+            "employmentType": "FULL_TIME"
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "JobPosting",
+            "title": "Product Manager (m/w/d)",
+            "url": "https://example.com/jobs/pm",
+            "jobLocation": {
+                "@type": "Place",
+                "address": {
+                    "@type": "PostalAddress",
+                    "addressLocality": "Munich"
+                }
+            },
+            "hiringOrganization": {
+                "@type": "Organization",
+                "name": "Example GmbH"
+            }
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "JobPosting",
+            "title": "DevOps Engineer",
+            "url": "/jobs/devops",
+            "jobLocation": {
+                "@type": "Place",
+                "address": "Hamburg"
+            }
+        }
+    ]
+    </script>
+</head>
+<body>
+    <header>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/careers">Careers</a>
+        </nav>
+    </header>
+    <main>
+        <h1>Offene Stellen</h1>
+        <div class="job-list">
+            <div class="job-card">
+                <h2>Senior Software Developer (m/w/d)</h2>
+                <p>Berlin • Vollzeit</p>
+                <a href="/jobs/senior-dev">Details</a>
+            </div>
+            <div class="job-card">
+                <h2>Product Manager (m/w/d)</h2>
+                <p>Munich • Vollzeit</p>
+                <a href="/jobs/pm">Details</a>
+            </div>
+            <div class="job-card">
+                <h2>DevOps Engineer</h2>
+                <p>Hamburg • Vollzeit</p>
+                <a href="/jobs/devops">Details</a>
+            </div>
+        </div>
+    </main>
+</body>
+</html>
+

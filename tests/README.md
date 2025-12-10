@@ -1,12 +1,26 @@
-# Smoke Tests
+# Tests
 
-Быстрые smoke тесты для проверки критичных компонентов проекта.
+Тесты для проверки критичных компонентов проекта.
+
+## Типы тестов
+
+| Тип | Файл | Описание |
+|-----|------|----------|
+| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (95 тестов) |
+| Integration | `test_integration_*.py` | Проверка парсинга с реальным HTML (16 тестов) |
+| Job Boards | `test_job_board_parsers.py` | Тесты парсеров платформ (34 теста) |
 
 ## Запуск тестов
 
 ```bash
-# Все smoke тесты
+# ВСЕ тесты (145 штук, ~1 сек)
 python -m pytest tests/ -v
+
+# Только smoke тесты (быстро)
+python -m pytest tests/test_smoke_*.py -v
+
+# Только интеграционные (после изменений в парсинге)
+python -m pytest tests/test_integration_parsing.py -v
 
 # Конкретный модуль
 python -m pytest tests/test_smoke_llm_base.py -v
@@ -24,10 +38,11 @@ python -m pytest tests/ -q
 
 | Файл | Тесты |
 |------|-------|
-| `src/llm/base.py` | `test_smoke_llm_base.py` |
+| `src/llm/base.py` | `test_smoke_llm_base.py`, `test_integration_parsing.py` |
 | `src/llm/prompts.py` | `test_smoke_prompts.py` |
 | `src/browser/loader.py` | `test_smoke_browser.py` |
-| `src/extraction/*.py` | `test_smoke_extraction.py` |
+| `src/extraction/*.py` | `test_smoke_extraction.py`, `test_integration_parsing.py` |
+| `src/searchers/job_boards/*.py` | `test_job_board_parsers.py` |
 
 ### Рекомендуется перед коммитом
 
@@ -40,11 +55,21 @@ python -m pytest tests/ -q --tb=short
 ```
 tests/
 ├── __init__.py
-├── conftest.py              # Общие фикстуры
-├── test_smoke_llm_base.py   # LLM: clean_html, extract_json, validate_jobs
-├── test_smoke_prompts.py    # Промпты: форматирование, плейсхолдеры
-├── test_smoke_browser.py    # Браузер: BrowserLoader, исключения
-└── test_smoke_extraction.py # Экстракция: Schema.org, HybridExtractor
+├── conftest.py                    # Общие фикстуры
+├── fixtures/                      # Тестовые HTML файлы
+│   ├── schema_org_jobs.html       # Schema.org JSON-LD
+│   ├── greenhouse_style.html      # Greenhouse-style layout
+│   ├── lever_jobs.html            # Lever job board
+│   ├── personio_jobs.html         # Personio job board
+│   ├── recruitee_jobs.html        # Recruitee (embedded JSON)
+│   ├── workable_jobs.html         # Workable (JSON-LD)
+│   └── odoo_jobs.html             # Odoo CMS page
+├── test_smoke_llm_base.py         # LLM: clean_html, extract_json
+├── test_smoke_prompts.py          # Промпты: форматирование
+├── test_smoke_browser.py          # Браузер: BrowserLoader
+├── test_smoke_extraction.py       # Экстракция: Schema.org
+├── test_integration_parsing.py    # Парсинг с реальным HTML
+└── test_job_board_parsers.py      # Job Board парсеры (Lever, Personio, etc.)
 ```
 
 ## Покрытие тестами
@@ -75,6 +100,21 @@ tests/
 - `HybridJobExtractor` - интеграция стратегий
 - `JobCandidate` - модель вакансии
 - `is_likely_job_title()` - определение job titles
+
+### `test_integration_parsing.py` (Интеграционные)
+- Парсинг Schema.org из реального HTML
+- Fallback на LLM когда нет Schema.org
+- Определение Odoo сайтов
+- Очистка HTML перед отправкой в LLM
+- Валидация и фильтрация результатов
+
+### `test_job_board_parsers.py` (Job Board парсеры)
+- **LeverParser** - `.posting`, `.posting-title` классы
+- **PersonioParser** - `/job/ID` ссылки
+- **RecruiteeParser** - embedded JSON, `/o/` ссылки
+- **WorkableParser** - JSON-LD, `/j/` ссылки
+- **GreenhouseParser** - `.opening`, `/jobs/` ссылки
+- **OdooParser** - `.o_job`, `/jobs/detail/` ссылки
 
 ## Добавление новых тестов
 

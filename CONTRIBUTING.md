@@ -29,7 +29,11 @@ ruff check .
 
 ### Запуск тестов
 ```bash
-pytest
+# Все тесты (111 штук, ~1 сек)
+python -m pytest tests/ -v
+
+# Быстрая проверка
+python -m pytest tests/ -q
 ```
 
 ## Добавление нового функционала
@@ -171,15 +175,45 @@ llm = get_llm_provider("openrouter", model="openai/gpt-oss-120b", provider="chut
 3. Убедитесь, что код проходит линтинг и тесты
 4. Создайте PR с описанием изменений
 
-## Структура тестов
+## Тестирование
+
+### Структура тестов
 
 ```
 tests/
-├── test_searchers/       # Тесты поисковиков
-├── test_extraction/      # Тесты экстракции
-├── test_database/        # Тесты базы данных
-├── test_llm/             # Тесты LLM провайдеров
-└── conftest.py           # Фикстуры pytest
+├── conftest.py                    # Общие фикстуры
+├── fixtures/                      # Тестовые HTML файлы
+│   ├── schema_org_jobs.html       # Schema.org JSON-LD
+│   ├── greenhouse_style.html      # Greenhouse-style layout
+│   └── odoo_jobs.html             # Odoo CMS page
+├── test_smoke_llm_base.py         # Smoke: LLM base методы
+├── test_smoke_prompts.py          # Smoke: промпты
+├── test_smoke_browser.py          # Smoke: BrowserLoader
+├── test_smoke_extraction.py       # Smoke: экстракция
+└── test_integration_parsing.py    # Integration: парсинг с реальным HTML
+```
+
+### Когда запускать тесты
+
+| После изменений в | Запустить |
+|-------------------|-----------|
+| `src/llm/base.py` | `pytest tests/test_smoke_llm_base.py tests/test_integration_parsing.py -v` |
+| `src/llm/prompts.py` | `pytest tests/test_smoke_prompts.py -v` |
+| `src/browser/loader.py` | `pytest tests/test_smoke_browser.py -v` |
+| `src/extraction/*.py` | `pytest tests/test_smoke_extraction.py tests/test_integration_parsing.py -v` |
+
+### Добавление тестового сайта
+
+Если нашли сайт с проблемой парсинга:
+
+1. Сохраните HTML: `curl https://example.com/careers > tests/fixtures/problem_site.html`
+2. Добавьте тест в `test_integration_parsing.py`:
+```python
+def test_parses_problem_site(self):
+    html = load_fixture("problem_site.html")
+    strategy = SchemaOrgStrategy()
+    candidates = strategy.extract(html, "https://example.com")
+    assert len(candidates) == 5
 ```
 
 ## Отладка

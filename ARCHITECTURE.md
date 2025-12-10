@@ -284,3 +284,30 @@ CLI (history) → JobRepository → job_history table → Output
 - Таймауты для всех сетевых запросов
 - Валидация входных данных через Pydantic
 - Provider routing для стабильности LLM запросов
+
+## Тестирование
+
+### Типы тестов
+
+| Тип | Файлы | Описание |
+|-----|-------|----------|
+| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (95 тестов) |
+| Integration | `test_integration_*.py` | Парсинг с сохранённым HTML (16 тестов) |
+| Job Boards | `test_job_board_parsers.py` | Парсеры платформ (34 теста) |
+
+### Структура
+
+```
+tests/
+├── fixtures/                      # Тестовые HTML (7 платформ)
+├── test_smoke_*.py                # Smoke тесты модулей
+├── test_integration_parsing.py    # E2E парсинг
+└── test_job_board_parsers.py      # Lever, Personio, Recruitee, Workable, Greenhouse, Odoo
+```
+
+### Запуск
+
+```bash
+python -m pytest tests/ -q                        # Все тесты (145 штук, ~1 сек)
+python -m pytest tests/test_job_board_parsers.py  # После изменений в job_boards/
+```
