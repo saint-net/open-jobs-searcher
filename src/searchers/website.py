@@ -485,7 +485,9 @@ class WebsiteSearcher(BaseSearcher):
             jobs = await self._convert_jobs_data(jobs_data, url, careers_url)
             
             # 9. Save to cache if enabled
-            if self.use_cache and self._repository and jobs:
+            # Сохраняем сайт и career_url даже если вакансий сейчас нет,
+            # чтобы отслеживать компанию при следующих сканированиях
+            if self.use_cache and self._repository and careers_url:
                 await self._save_to_cache(domain, careers_url, jobs)
 
             return jobs
@@ -539,10 +541,13 @@ class WebsiteSearcher(BaseSearcher):
     async def _save_to_cache(self, domain: str, careers_url: str, jobs: list[Job]) -> None:
         """Save discovered career URL and jobs to cache.
         
+        Сохраняет сайт и career URL даже если вакансий сейчас нет,
+        чтобы отслеживать компанию при следующих сканированиях.
+        
         Args:
             domain: Site domain
             careers_url: Discovered career page URL
-            jobs: Found jobs
+            jobs: Found jobs (может быть пустым, если вакансий сейчас нет)
         """
         try:
             # Get or create site
@@ -570,13 +575,17 @@ class WebsiteSearcher(BaseSearcher):
             logger.debug(f"Cached career URL for {domain}: {careers_url}")
             
             # Sync jobs (this also handles new/removed tracking)
+            # Работает корректно даже с пустым списком - отметит все старые как removed
             sync_result = await self._repository.sync_jobs(site.id, jobs)
             self.last_sync_result = sync_result
             
             # Update site scan timestamp
             await self._repository.update_site_scanned(site.id)
             
-            logger.info(f"Cached {len(jobs)} jobs for {domain}")
+            if jobs:
+                logger.info(f"Cached {len(jobs)} jobs for {domain}")
+            else:
+                logger.info(f"Cached career URL for {domain} (no jobs currently)")
             
             if sync_result.has_changes:
                 logger.info(
