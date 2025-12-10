@@ -111,6 +111,21 @@ class WebsiteSearcher(BaseSearcher):
             # 0. Quick domain availability check
             await self.http_client.check_domain_available(url)
             
+            # 0.1 Check for domain redirect (e.g., 7pace.com -> appfire.com)
+            final_url, redirected_to_different_domain = await self.http_client.check_redirect(url)
+            if redirected_to_different_domain:
+                original_domain = urlparse(url).netloc.replace('www.', '')
+                new_domain = urlparse(final_url).netloc.replace('www.', '')
+                logger.warning(
+                    f"Domain {original_domain} redirects to {new_domain}. "
+                    f"Company may have been acquired or rebranded. "
+                    f"Searching on {new_domain} instead."
+                )
+                # Use new domain for search
+                new_base_url = f"https://{new_domain}"
+                url = new_base_url
+                domain = new_domain
+            
             # Try to use cached career URLs first
             if self.use_cache and self._repository:
                 jobs = await self._search_with_cache(url, domain)

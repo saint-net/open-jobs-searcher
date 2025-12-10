@@ -22,18 +22,18 @@ class OpenRouterProvider(BaseLLMProvider):
     MODEL_CONFIGS = {
         "openai/gpt-oss-20b": {
             "temperature": 0.0,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
         },
         "openai/gpt-oss-120b": {
             "temperature": 0.0,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
         },
     }
 
     # Дефолтная конфигурация для неизвестных моделей
     DEFAULT_CONFIG = {
         "temperature": 0.0,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
     }
 
     # Retry settings for transient API errors

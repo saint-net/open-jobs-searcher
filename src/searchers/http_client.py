@@ -238,6 +238,36 @@ class AsyncHttpClient:
         if self._insecure_client is not None:
             await self._insecure_client.aclose()
 
+    async def check_redirect(self, url: str) -> tuple[str, bool]:
+        """
+        Check if URL redirects to a different domain.
+        
+        Args:
+            url: URL to check
+            
+        Returns:
+            Tuple (final_url, is_different_domain)
+        """
+        from urllib.parse import urlparse
+        
+        original_domain = urlparse(url).netloc.replace('www.', '').lower()
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                response = await client.head(url)
+                final_url = str(response.url)
+                final_domain = urlparse(final_url).netloc.replace('www.', '').lower()
+                
+                is_different = original_domain != final_domain
+                
+                if is_different:
+                    logger.info(f"Domain redirect detected: {url} -> {final_url}")
+                
+                return final_url, is_different
+        except Exception as e:
+            logger.debug(f"Redirect check failed for {url}: {e}")
+            return url, False
+
     async def __aenter__(self):
         return self
 

@@ -152,3 +152,39 @@ class TestFilterNotAppliedToInternalNavigation:
         # Therefore _filter_jobs_by_search_query should NOT be called
         # and all jobs should be kept
 
+
+class TestDomainRedirectDetection:
+    """Test detection of redirects to different domains (M&A cases)."""
+    
+    def test_same_domain_no_redirect(self):
+        """Same domain should not be flagged as redirect."""
+        original = "https://company.com"
+        final = "https://company.com/home"
+        
+        orig_domain = urlparse(original).netloc.replace('www.', '').lower()
+        final_domain = urlparse(final).netloc.replace('www.', '').lower()
+        
+        assert orig_domain == final_domain
+    
+    def test_www_added_not_redirect(self):
+        """Adding www should not be flagged as redirect."""
+        original = "https://company.com"
+        final = "https://www.company.com"
+        
+        orig_domain = urlparse(original).netloc.replace('www.', '').lower()
+        final_domain = urlparse(final).netloc.replace('www.', '').lower()
+        
+        assert orig_domain == final_domain
+    
+    def test_different_domain_is_redirect(self):
+        """Different domain should be flagged as redirect (7pace -> appfire)."""
+        original = "https://7pace.com"
+        final = "https://appfire.com/7pace"
+        
+        orig_domain = urlparse(original).netloc.replace('www.', '').lower()
+        final_domain = urlparse(final).netloc.replace('www.', '').lower()
+        
+        assert orig_domain != final_domain
+        assert orig_domain == "7pace.com"
+        assert final_domain == "appfire.com"
+

@@ -707,8 +707,8 @@ class BaseLLMProvider(ABC):
         # Пробуем распарсить весь ответ как JSON (если LLM вернул чистый JSON)
         try:
             return json.loads(response.strip())
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as e:
+            logger.debug(f"Direct JSON parse failed: {e}")
 
         # Пробуем найти JSON объект с "jobs" ключом
         # Используем нежадный паттерн для вложенных структур
