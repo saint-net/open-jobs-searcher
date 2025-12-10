@@ -52,7 +52,6 @@ logs/
 .ruff_cache/
 
 # Data files
-data/
 *.csv
 *.json
 !config/*.json
