@@ -6,6 +6,12 @@ from contextlib import asynccontextmanager
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
 
+try:
+    from playwright_stealth import Stealth
+    STEALTH_AVAILABLE = True
+except ImportError:
+    STEALTH_AVAILABLE = False
+
 from .exceptions import DomainUnreachableError, PlaywrightBrowsersNotInstalledError
 from .patterns import DEFAULT_USER_AGENT, NETWORK_ERROR_PATTERNS
 from .cookie_handler import handle_cookie_consent
@@ -34,6 +40,10 @@ class BrowserLoader:
         self.timeout = timeout
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
+        self._stealth = Stealth() if STEALTH_AVAILABLE else None
+        # Max time to wait for Cloudflare in visible mode (user can solve CAPTCHA)
+        self._cf_max_wait_visible = 60  # seconds
+        self._cf_max_wait_headless = 30  # seconds
 
     async def start(self):
         """Запустить браузер."""
@@ -42,13 +52,33 @@ class BrowserLoader:
             # Launch browser with clean context (no cookies from previous sessions)
             # Add Chromium args to allow third-party cookies (needed for HRworks and similar job boards)
             try:
-                self._browser = await self._playwright.chromium.launch(
-                    headless=self.headless,
-                    args=[
-                        "--disable-features=SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure",
-                        "--disable-site-isolation-trials",
-                    ],
-                )
+                # Try Chrome first (better anti-bot bypass), fallback to Chromium
+                # Anti-detection browser args
+                browser_args = [
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure",
+                    "--disable-site-isolation-trials",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-infobars",
+                    "--disable-extensions",
+                    "--disable-popup-blocking",
+                ]
+                
+                # Try Chrome first, fallback to Chromium
+                try:
+                    self._browser = await self._playwright.chromium.launch(
+                        headless=self.headless,
+                        channel="chrome",
+                        args=browser_args,
+                    )
+                    logger.debug("Using Chrome browser")
+                except Exception as chrome_err:
+                    logger.debug(f"Chrome not available ({chrome_err}), falling back to Chromium")
+                    self._browser = await self._playwright.chromium.launch(
+                        headless=self.headless,
+                        args=browser_args,
+                    )
             except Exception as e:
                 error_str = str(e)
                 # Check if the error is about missing browser executable
@@ -74,6 +104,7 @@ class BrowserLoader:
                             args=[
                                 "--disable-features=SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure",
                                 "--disable-site-isolation-trials",
+                                "--disable-blink-features=AutomationControlled",
                             ],
                         )
                     except Exception as install_error:
@@ -147,6 +178,11 @@ class BrowserLoader:
         try:
             # Create page with HTTPS errors ignored (for sites with certificate issues)
             context = await self._browser.new_context(ignore_https_errors=True)
+            
+            # Apply stealth to bypass bot detection
+            if self._stealth:
+                await self._stealth.apply_stealth_async(context)
+            
             page = await context.new_page()
             
             # Устанавливаем User-Agent (полный, чтобы избежать блокировок)
@@ -157,7 +193,47 @@ class BrowserLoader:
             # Загружаем страницу (domcontentloaded быстрее чем networkidle)
             response = await page.goto(url, timeout=self.timeout, wait_until="domcontentloaded")
             
-            if response is None or response.status >= 400:
+            if response is None:
+                return None
+            
+            # Check for Cloudflare challenge (403/503 with JS challenge)
+            initial_status = response.status
+            if initial_status in (403, 503, 520, 521, 522, 523, 524, 525, 526):
+                max_wait = self._cf_max_wait_visible if not self.headless else self._cf_max_wait_headless
+                max_attempts = max_wait // 5
+                
+                if not self.headless:
+                    logger.info(f"Cloudflare challenge detected. Waiting up to {max_wait}s (solve CAPTCHA if needed)...")
+                else:
+                    logger.debug(f"Got status {initial_status}, waiting for Cloudflare challenge...")
+                
+                # Wait for Cloudflare to complete (it reloads the page after JS challenge)
+                for attempt in range(max_attempts):
+                    await page.wait_for_timeout(5000)
+                    html = await page.content()
+                    
+                    # Check if still on challenge/error page
+                    is_cf_challenge = any(x in html for x in [
+                        "Checking your browser", "Just a moment", "challenges.cloudflare.com",
+                        "403 Forbidden", "Please Wait...", "DDoS protection", "Enable JavaScript"
+                    ])
+                    
+                    if not is_cf_challenge and len(html) > 2000:
+                        logger.debug(f"Cloudflare challenge passed after {(attempt+1)*5}s")
+                        break
+                    
+                    logger.debug(f"Still waiting for Cloudflare... ({(attempt+1)*5}/{max_wait}s)")
+                else:
+                    logger.debug(f"Cloudflare challenge not passed after {max_wait}s")
+                    return None
+                    
+                # Wait for full page load
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=10000)
+                except Exception:
+                    pass
+            elif 400 <= initial_status < 500:
+                # Real 4xx error (not Cloudflare)
                 return None
 
             # Ждём дополнительный селектор если указан
@@ -211,6 +287,11 @@ class BrowserLoader:
         context = None
         try:
             context = await self._browser.new_context(ignore_https_errors=True)
+            
+            # Apply stealth to bypass bot detection
+            if self._stealth:
+                await self._stealth.apply_stealth_async(context)
+            
             page = await context.new_page()
             
             await page.set_extra_http_headers({
@@ -219,7 +300,40 @@ class BrowserLoader:
 
             response = await page.goto(url, timeout=self.timeout, wait_until="domcontentloaded")
             
-            if response is None or response.status >= 400:
+            if response is None:
+                if page:
+                    await page.close()
+                if context:
+                    await context.close()
+                return None, None, None, None
+            
+            # Check for Cloudflare challenge
+            initial_status = response.status
+            if initial_status in (403, 503, 520, 521, 522, 523, 524, 525, 526):
+                logger.debug(f"Got status {initial_status}, waiting for Cloudflare challenge...")
+                await page.wait_for_timeout(5000)
+                
+                html = await page.content()
+                if "Checking your browser" in html or "Just a moment" in html:
+                    logger.debug("Still on Cloudflare challenge, waiting more...")
+                    await page.wait_for_timeout(5000)
+                    html = await page.content()
+                
+                if len(html) < 1000 and ("403" in html or "Forbidden" in html):
+                    logger.debug("Cloudflare blocked the request")
+                    if page:
+                        await page.close()
+                    if context:
+                        await context.close()
+                    return None, None, None, None
+                
+                logger.debug("Cloudflare challenge passed, waiting for content...")
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=10000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(2000)
+            elif 400 <= initial_status < 500:
                 if page:
                     await page.close()
                 if context:
@@ -338,6 +452,11 @@ class BrowserLoader:
         try:
             # Create page with HTTPS errors ignored (for sites with certificate issues)
             context = await self._browser.new_context(ignore_https_errors=True)
+            
+            # Apply stealth to bypass bot detection
+            if self._stealth:
+                await self._stealth.apply_stealth_async(context)
+            
             page = await context.new_page()
             
             await page.set_extra_http_headers({
@@ -346,7 +465,32 @@ class BrowserLoader:
 
             response = await page.goto(url, timeout=self.timeout, wait_until="domcontentloaded")
             
-            if response is None or response.status >= 400:
+            if response is None:
+                return None, None
+            
+            # Check for Cloudflare challenge
+            initial_status = response.status
+            if initial_status in (403, 503, 520, 521, 522, 523, 524, 525, 526):
+                logger.debug(f"Got status {initial_status}, waiting for Cloudflare challenge...")
+                await page.wait_for_timeout(5000)
+                
+                html = await page.content()
+                if "Checking your browser" in html or "Just a moment" in html:
+                    logger.debug("Still on Cloudflare challenge, waiting more...")
+                    await page.wait_for_timeout(5000)
+                
+                content = await page.content()
+                if len(content) < 1000 and ("403" in content or "Forbidden" in content):
+                    logger.debug("Cloudflare blocked the request")
+                    return None, None
+                
+                logger.debug("Cloudflare challenge passed, waiting for content...")
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=10000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(2000)
+            elif 400 <= initial_status < 500:
                 return None, None
 
             # Ждём начальный рендеринг

@@ -501,6 +501,11 @@ def website(
         "--nodb",
         help="Не использовать базу данных (без кэширования и истории)",
     ),
+    visible: bool = typer.Option(
+        False,
+        "--visible",
+        help="Показать окно браузера (для сайтов с защитой от ботов)",
+    ),
 ):
     """Поиск вакансий на сайте компании с помощью LLM."""
     start_time = time.perf_counter()
@@ -532,7 +537,8 @@ def website(
     jobs, sync_result = asyncio.run(_search_website(
         url, provider, model, browser, 
         use_cache=not nodb, 
-        openrouter_provider=openrouter_provider
+        openrouter_provider=openrouter_provider,
+        headless=not visible,
     ))
     
     # Отображаем результаты синхронизации (новые/удалённые)
@@ -556,6 +562,7 @@ async def _search_website(
     use_browser: bool,
     use_cache: bool = True,
     openrouter_provider: Optional[str] = None,
+    headless: bool = True,
 ) -> tuple:
     """Асинхронный поиск вакансий на сайте.
     
@@ -566,6 +573,7 @@ async def _search_website(
         use_browser: Использовать браузер
         use_cache: Использовать кэширование в SQLite
         openrouter_provider: Бэкенд-провайдер OpenRouter (chutes, siliconflow и т.д.)
+        headless: Запускать браузер без GUI
     
     Returns:
         Tuple (jobs, sync_result) - sync_result может быть None при первом запуске или если use_cache=False
@@ -587,7 +595,7 @@ async def _search_website(
         console.print(f"[red]✗[/red] Ошибка инициализации LLM: {e}")
         return [], None
 
-    async with WebsiteSearcher(llm, use_browser=use_browser, use_cache=use_cache) as searcher:
+    async with WebsiteSearcher(llm, use_browser=use_browser, use_cache=use_cache, headless=headless) as searcher:
         try:
             status_msg = "[bold green]Анализирую сайт через браузер..." if use_browser else "[bold green]Анализирую сайт..."
             with console.status(status_msg):
