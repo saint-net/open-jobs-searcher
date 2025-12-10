@@ -659,5 +659,30 @@ class TestPdfLinkStrategy:
         assert titles.count("developer") == 1
 
 
+class Test711mediaPlatformDetection:
+    """Test that 711media.de is not detected as a known job board platform."""
+    
+    def test_711media_not_detected_as_job_board(self):
+        """711media.de is a custom TYPO3 site, not a known job board."""
+        from src.searchers.job_boards.detector import detect_job_board_platform
+        
+        html = load_fixture("711media_jobs.html")
+        platform = detect_job_board_platform("https://www.711media.de/jobs-in-stuttgart", html)
+        
+        # Should not match any known platform - returns None or 'unknown'
+        assert platform is None or platform == "unknown"
+    
+    def test_711media_is_typo3_site(self):
+        """711media.de is built on TYPO3 CMS."""
+        html = load_fixture("711media_jobs.html")
+        
+        # TYPO3 generator meta tag
+        assert 'content="TYPO3 CMS"' in html
+        
+        # TYPO3 extension paths
+        assert "typo3conf/ext/" in html
+        assert "typo3temp/" in html
+
+
 # Run with: pytest tests/test_job_board_parsers.py -v
 

@@ -801,5 +801,144 @@ class Test4zeroParsing:
         assert "job-listing-title" in html
 
 
+class Test711mediaParsing:
+    """Test parsing 711media.de - Custom TYPO3 site (Digital agency).
+    
+    711media websolutions GmbH is a digital agency in Stuttgart.
+    Custom TYPO3 corporate website, uses LLM extraction - no specialized parser.
+    Notable: Has filter radio buttons for job categories.
+    Source: https://www.711media.de/jobs-in-stuttgart
+    """
+    
+    def test_711media_html_structure_parsing(self):
+        """Test real HTML parsing of job list structure (no LLM mock)."""
+        from bs4 import BeautifulSoup
+        
+        html = load_fixture("711media_jobs.html")
+        soup = BeautifulSoup(html, 'lxml')
+        
+        # Find job list
+        job_list = soup.find('ul', class_='jobs__list')
+        assert job_list is not None, "Should find jobs__list element"
+        
+        # Find all job items
+        job_items = job_list.find_all('li', class_='jobs__item')
+        assert len(job_items) == 14, f"Should find 14 jobs, found {len(job_items)}"
+        
+        # Parse job data from HTML
+        jobs = []
+        for item in job_items:
+            link = item.find('a', class_='jobs__link')
+            if link:
+                jobs.append({
+                    'title': link.get_text(strip=True),
+                    'url': link.get('href', ''),
+                })
+        
+        # Verify extracted data
+        assert len(jobs) == 14
+        
+        titles = {j['title'] for j in jobs}
+        assert 'DevOps Engineer (m/w/d)' in titles
+        assert 'Shopware Developer (m/w/d)' in titles
+        assert 'Senior UI Designer (m/w/d)' in titles
+        assert 'SEO Manager (m/w/d)' in titles
+        
+        # Check URLs are relative paths
+        urls = [j['url'] for j in jobs]
+        assert all(url.startswith('/jobs-in-stuttgart/') for url in urls)
+    
+    @pytest.mark.asyncio
+    async def test_llm_extracts_jobs_from_711media(self):
+        """Should extract jobs via LLM (no Schema.org on this site)."""
+        html = load_fixture("711media_jobs.html")
+        
+        async def mock_llm(html, url):
+            return [
+                {"title": "DevOps Engineer (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/devops-engineer"},
+                {"title": "Finanzbuchhalter (m/w/d) in Teilzeit (50 %)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/finanzbuchhalter-in-teilzeit-50"},
+                {"title": "Junior Projektmanager Digital (M/W/D)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/junior-projektmanager-digital"},
+                {"title": "Junior Sales Manager (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/junior-sales-manager"},
+                {"title": "Senior Webanalyst (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/senior-webanalyst"},
+                {"title": "SEO Manager (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/seo-manager"},
+                {"title": "Senior Sales Manager (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/senior-sales-manager"},
+                {"title": "Senior Projektmanager - Digital Solutions (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/senior-projektmanager-digital-solutions"},
+                {"title": "Senior Projektmanager E-Commerce (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/senior-projektmanager-e-commerce"},
+                {"title": "Senior UI Designer (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/senior-ui-designer"},
+                {"title": "Senior UX Designer (M/W/D)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/senior-ux-designer"},
+                {"title": "SEA Manager (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/sea-manager"},
+                {"title": "Online Marketing Manager Hubspot (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/online-marketing-manager-hubspot"},
+                {"title": "Shopware Developer (m/w/d)", "location": "Stuttgart", "url": "/jobs-in-stuttgart/shopware-entwickler"},
+            ]
+        
+        extractor = HybridJobExtractor(llm_extract_fn=mock_llm)
+        jobs = await extractor.extract(html, "https://www.711media.de")
+        
+        assert len(jobs) == 14
+        
+        titles = {j["title"] for j in jobs}
+        assert "DevOps Engineer (m/w/d)" in titles
+        assert "Shopware Developer (m/w/d)" in titles
+        assert "Senior UI Designer (m/w/d)" in titles
+    
+    def test_711media_html_has_job_content(self):
+        """Verify the fixture contains expected job content."""
+        html = load_fixture("711media_jobs.html")
+        
+        # Check job-related content
+        assert "DevOps Engineer (m/w/d)" in html
+        assert "Shopware Developer (m/w/d)" in html
+        assert "Senior Projektmanager" in html
+        assert "(m/w/d)" in html
+        
+        # Check structure
+        assert "jobs__list" in html
+        assert "jobs__item" in html
+        assert "jobs__link" in html
+        
+        # Check TYPO3 marker
+        assert "TYPO3" in html
+    
+    def test_711media_no_schema_org(self):
+        """711media.de should not have Schema.org (falls back to LLM)."""
+        html = load_fixture("711media_jobs.html")
+        strategy = SchemaOrgStrategy()
+        
+        candidates = strategy.extract(html, "https://www.711media.de")
+        
+        assert len(candidates) == 0
+    
+    def test_clean_html_preserves_711media_jobs(self):
+        """HTML cleaning should preserve job content from 711media.de."""
+        html = load_fixture("711media_jobs.html")
+        provider = MockLLMProvider()
+        
+        clean = provider._clean_html(html)
+        
+        # Job titles should be preserved
+        assert "DevOps Engineer" in clean
+        assert "Shopware Developer" in clean
+        assert "Projektmanager" in clean
+        assert "(m/w/d)" in clean
+        
+        # Job URLs should be preserved
+        assert "/jobs-in-stuttgart/" in clean
+    
+    def test_711media_has_category_filters(self):
+        """711media has job category filter radio buttons.
+        
+        Categories: Human Resource, Sales, Entwicklung, Projektmanagement,
+        Online Marketing, UX/UI & Design, Ausbildung / Praktika / Student
+        """
+        html = load_fixture("711media_jobs.html")
+        
+        # Category filters exist
+        assert 'name="tx_mediacontent_pi2[jobTag]"' in html
+        assert "Entwicklung" in html
+        assert "Projektmanagement" in html
+        assert "Online Marketing" in html
+        assert "UX/UI" in html
+
+
 # Run with: pytest tests/test_integration_parsing.py -v
 

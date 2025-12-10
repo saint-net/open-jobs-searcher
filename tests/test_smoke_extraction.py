@@ -327,5 +327,32 @@ class TestIsLikelyJobTitle:
             assert is_likely is False, f"Should reject navigation item '{item}'"
 
 
+class Test711mediaJobTitles:
+    """Test job title validation with 711media.de job titles."""
+    
+    def test_accepts_711media_job_titles(self):
+        """Should accept typical 711media job titles."""
+        titles = [
+            "DevOps Engineer (m/w/d)",
+            "Shopware Developer (m/w/d)",
+            "Senior UI Designer (m/w/d)",
+            "SEO Manager (m/w/d)",
+            "Senior Projektmanager E-Commerce (m/w/d)",
+            "Online Marketing Manager Hubspot (m/w/d)",
+        ]
+        
+        for title in titles:
+            is_likely, signals = is_likely_job_title(title)
+            assert is_likely is True, f"Should accept '{title}', signals: {signals}"
+    
+    def test_711media_titles_have_gender_notation(self):
+        """711media job titles have (m/w/d) notation."""
+        title = "Shopware Developer (m/w/d)"
+        is_likely, signals = is_likely_job_title(title)
+        
+        assert is_likely is True
+        assert signals.get("has_gender_notation", False) is True
+
+
 # Run with: pytest tests/test_smoke_extraction.py -v
 
