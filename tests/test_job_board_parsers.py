@@ -443,6 +443,28 @@ class TestPdfLinkStrategy:
         # Should find 4 job PDFs (not the product brochure, AGB, or datenschutz)
         assert len(candidates) == 4
     
+    def test_4pipes_real_site(self):
+        """Should extract jobs from real 4pipes.de website."""
+        from src.extraction.strategies import PdfLinkStrategy
+        
+        html = load_fixture("4pipes_jobs.html")
+        strategy = PdfLinkStrategy()
+        
+        candidates = strategy.extract(html, "https://www.4pipes.de/jobs.htm")
+        
+        # Should find 3 job PDFs
+        assert len(candidates) == 3
+        
+        titles = {c.title for c in candidates}
+        assert "IT-Systemadministrator" in titles
+        assert "Vertriebsmitarbeiter-Innendienst" in titles
+        assert "Vertriebsmitarbeiter-Innendienst-Export" in titles
+        
+        # All URLs should point to PDFs
+        for c in candidates:
+            assert c.url.endswith(".pdf")
+            assert "4pipes" in c.url.lower() or "stellenausschreibung" in c.url.lower()
+    
     def test_extracts_titles_correctly(self):
         """Should extract job titles from PDF filenames."""
         from src.extraction.strategies import PdfLinkStrategy
