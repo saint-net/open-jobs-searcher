@@ -547,5 +547,88 @@ class Test3pServicesParsing:
         assert "/career/jobs/" in clean
 
 
+class Test3ssParsing:
+    """Test parsing 3ss.tv - Custom site (Entertainment platform).
+    
+    3SS is a custom corporate website (not a job board platform).
+    Uses LLM extraction - no specialized parser.
+    Important: This site had a Glassdoor link that should NOT be followed.
+    Source: https://www.3ss.tv/careers
+    """
+    
+    @pytest.mark.asyncio
+    async def test_llm_extracts_jobs_from_3ss(self):
+        """Should extract jobs via LLM (no Schema.org on this site)."""
+        html = load_fixture("3ss_careers.html")
+        
+        async def mock_llm(html, url):
+            return [
+                {"title": "Senior Lightning.js (JavaScript) Software Engineer", "location": "Brașov, Targu Mureș, Cluj-Napoca", "url": "/careers/senior-lightning-js"},
+                {"title": "Product Designer", "location": "Brașov, Targu Mureș, Cluj-Napoca, Chișinău", "url": "/careers/product-designer"},
+                {"title": "React Native SW Engineer", "location": "Brașov, Targu Mureș, Cluj-Napoca", "url": "/careers/react-native-engineer"},
+                {"title": "QA Engineer", "location": "Brașov, Targu Mureș, Cluj-Napoca, Chișinău", "url": "/careers/qa-engineer"},
+            ]
+        
+        extractor = HybridJobExtractor(llm_extract_fn=mock_llm)
+        jobs = await extractor.extract(html, "https://www.3ss.tv")
+        
+        assert len(jobs) == 4
+        
+        titles = {j["title"] for j in jobs}
+        assert "Senior Lightning.js (JavaScript) Software Engineer" in titles
+        assert "Product Designer" in titles
+        assert "React Native SW Engineer" in titles
+        assert "QA Engineer" in titles
+    
+    def test_3ss_html_has_job_content(self):
+        """Verify the fixture contains expected job content."""
+        html = load_fixture("3ss_careers.html")
+        
+        # Check job-related content
+        assert "Senior Lightning" in html
+        assert "Product Designer" in html
+        assert "React Native" in html
+        assert "QA Engineer" in html
+        
+        # Check location markers
+        assert "Brașov" in html or "Brasov" in html
+        assert "Cluj" in html
+        
+        # Check page structure
+        assert "Open Positions" in html
+    
+    def test_3ss_no_schema_org(self):
+        """3ss.tv should not have Schema.org (falls back to LLM)."""
+        html = load_fixture("3ss_careers.html")
+        strategy = SchemaOrgStrategy()
+        
+        candidates = strategy.extract(html, "https://www.3ss.tv")
+        
+        assert len(candidates) == 0
+    
+    def test_clean_html_preserves_3ss_jobs(self):
+        """HTML cleaning should preserve job content from 3ss.tv."""
+        html = load_fixture("3ss_careers.html")
+        provider = MockLLMProvider()
+        
+        clean = provider._clean_html(html)
+        
+        assert "Lightning" in clean
+        assert "Product Designer" in clean
+        assert "React Native" in clean
+        assert "QA Engineer" in clean
+    
+    def test_3ss_html_has_glassdoor_link(self):
+        """Verify Glassdoor link exists (should be ignored by job board finder).
+        
+        This test documents that the page has a Glassdoor link,
+        which the LLM should NOT follow as a job board.
+        """
+        html = load_fixture("3ss_careers.html")
+        
+        # The page has a Glassdoor link (but it's a review site, not a job board)
+        assert "glassdoor" in html.lower()
+
+
 # Run with: pytest tests/test_integration_parsing.py -v
 
