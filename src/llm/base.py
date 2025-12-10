@@ -618,6 +618,26 @@ class BaseLLMProvider(ABC):
         for tag in soup.find_all(['script', 'style', 'svg', 'noscript', 'head', 'meta', 'link', 'iframe']):
             tag.decompose()
         
+        # Remove cookie consent dialogs (can be 5+ MB on some sites like Cookiebot)
+        # These dialogs significantly inflate HTML size and don't contain job data
+        cookie_selectors = [
+            '[role="dialog"]',
+            '[id*="cookie"]',
+            '[id*="consent"]',
+            '[class*="cookie"]',
+            '[class*="consent"]',
+            '[id*="gdpr"]',
+            '[class*="gdpr"]',
+            '[id*="CookieBot"]',
+            '[class*="CookieBot"]',
+        ]
+        for selector in cookie_selectors:
+            try:
+                for element in soup.select(selector):
+                    element.decompose()
+            except Exception:
+                pass  # Ignore CSS selector errors
+        
         # Удаляем комментарии
         from bs4 import Comment
         for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
