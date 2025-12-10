@@ -7,13 +7,13 @@
 | Тип | Файл | Описание |
 |-----|------|----------|
 | Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (95 тестов) |
-| Integration | `test_integration_*.py` | Проверка парсинга с реальным HTML (24 теста) |
+| Integration | `test_integration_*.py` | Проверка парсинга с реальным HTML (28 тестов) |
 | Job Boards | `test_job_board_parsers.py` | Тесты парсеров платформ (34 теста) |
 
 ## Запуск тестов
 
 ```bash
-# ВСЕ тесты (153 штуки, ~1 сек)
+# ВСЕ тесты (157 штук, ~1 сек)
 python -m pytest tests/ -v
 
 # Только smoke тесты (быстро)
@@ -65,7 +65,8 @@ tests/
 │   ├── workable_jobs.html         # Workable (JSON-LD)
 │   ├── odoo_jobs.html             # Odoo CMS page
 │   ├── ui_city_jobs.html          # ui.city corporate site
-│   └── 1nce_jobs.html             # 1nce.com IoT company
+│   ├── 1nce_jobs.html             # 1nce.com IoT company
+│   └── 3p_services_jobs.html      # 3p-services.com pipeline inspection
 ├── test_smoke_llm_base.py         # LLM: clean_html, extract_json
 ├── test_smoke_prompts.py          # Промпты: форматирование
 ├── test_smoke_browser.py          # Браузер: BrowserLoader

@@ -474,5 +474,76 @@ class Test1nceParsing:
         assert "/careers/" in clean
 
 
+class Test3pServicesParsing:
+    """Test parsing 3p-services.com pipeline inspection company.
+    
+    3P Services is a German pipeline inspection company with custom careers page.
+    Source: https://www.3p-services.com/career/jobs/
+    """
+    
+    @pytest.mark.asyncio
+    async def test_llm_extracts_jobs_from_3p_services(self):
+        """Should extract jobs via LLM (no Schema.org on this site)."""
+        html = load_fixture("3p_services_jobs.html")
+        
+        async def mock_llm(html, url):
+            return [
+                {"title": "Sales & Project Manager – French", "location": "Lingen, Germany", "url": "/career/jobs/sales-project-manager-french"},
+                {"title": "Sales & Project Manager", "location": "Lingen, Germany", "url": "/career/jobs/sales-project-manager"},
+                {"title": "Inside Sales", "location": "Lingen, Germany", "url": "/career/jobs/inside-sales"},
+                {"title": "Data Scientist", "location": "Lingen, Germany", "url": "/career/jobs/data-scientist"},
+                {"title": "Team Leader Software Development", "location": "Lingen, Germany", "url": "/career/jobs/team-leader-software-development"},
+                {"title": "Financial Accountant – Int. Tax Law", "location": "Lingen, Germany", "url": "/career/jobs/financial-accountant"},
+                {"title": "Electronics Technician", "location": "Lingen, Germany", "url": "/career/jobs/electronics-technician"},
+                {"title": "Service Technician", "location": "Lingen, Germany", "url": "/career/jobs/service-technician"},
+            ]
+        
+        extractor = HybridJobExtractor(llm_extract_fn=mock_llm)
+        jobs = await extractor.extract(html, "https://www.3p-services.com")
+        
+        assert len(jobs) == 8
+        
+        titles = {j["title"] for j in jobs}
+        assert "Data Scientist" in titles
+        assert "Team Leader Software Development" in titles
+        assert "Electronics Technician" in titles
+    
+    def test_3p_services_html_has_job_content(self):
+        """Verify the fixture contains expected job content."""
+        html = load_fixture("3p_services_jobs.html")
+        
+        # Check job-related content
+        assert "Sales & Project Manager" in html
+        assert "Data Scientist" in html
+        assert "Team Leader Software Development" in html
+        assert "Electronics Technician" in html
+        assert "Service Technician" in html
+        
+        # Check structure
+        assert "job-item" in html
+        assert "job-listings" in html
+        assert "open-jobs" in html
+    
+    def test_3p_services_no_schema_org(self):
+        """3p-services.com should not have Schema.org (falls back to LLM)."""
+        html = load_fixture("3p_services_jobs.html")
+        strategy = SchemaOrgStrategy()
+        
+        candidates = strategy.extract(html, "https://www.3p-services.com")
+        
+        assert len(candidates) == 0
+    
+    def test_clean_html_preserves_3p_services_jobs(self):
+        """HTML cleaning should preserve job content from 3p-services."""
+        html = load_fixture("3p_services_jobs.html")
+        provider = MockLLMProvider()
+        
+        clean = provider._clean_html(html)
+        
+        assert "Data Scientist" in clean
+        assert "Software Development" in clean
+        assert "/career/jobs/" in clean
+
+
 # Run with: pytest tests/test_integration_parsing.py -v
 
