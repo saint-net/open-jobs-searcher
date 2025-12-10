@@ -29,11 +29,14 @@ ruff check .
 
 ### Запуск тестов
 ```bash
-# Все тесты (111 штук, ~1 сек)
+# Все тесты (145 штук, ~1 сек)
 python -m pytest tests/ -v
 
 # Быстрая проверка
 python -m pytest tests/ -q
+
+# После изменений в job board парсерах
+python -m pytest tests/test_job_board_parsers.py -v
 ```
 
 ## Добавление нового функционала
@@ -182,15 +185,20 @@ llm = get_llm_provider("openrouter", model="openai/gpt-oss-120b", provider="chut
 ```
 tests/
 ├── conftest.py                    # Общие фикстуры
-├── fixtures/                      # Тестовые HTML файлы
+├── fixtures/                      # Тестовые HTML файлы (7 платформ)
 │   ├── schema_org_jobs.html       # Schema.org JSON-LD
 │   ├── greenhouse_style.html      # Greenhouse-style layout
+│   ├── lever_jobs.html            # Lever job board
+│   ├── personio_jobs.html         # Personio job board
+│   ├── recruitee_jobs.html        # Recruitee (embedded JSON)
+│   ├── workable_jobs.html         # Workable (JSON-LD)
 │   └── odoo_jobs.html             # Odoo CMS page
 ├── test_smoke_llm_base.py         # Smoke: LLM base методы
 ├── test_smoke_prompts.py          # Smoke: промпты
 ├── test_smoke_browser.py          # Smoke: BrowserLoader
 ├── test_smoke_extraction.py       # Smoke: экстракция
-└── test_integration_parsing.py    # Integration: парсинг с реальным HTML
+├── test_integration_parsing.py    # Integration: парсинг с реальным HTML
+└── test_job_board_parsers.py      # Job Board парсеры (34 теста)
 ```
 
 ### Когда запускать тесты
@@ -201,6 +209,7 @@ tests/
 | `src/llm/prompts.py` | `pytest tests/test_smoke_prompts.py -v` |
 | `src/browser/loader.py` | `pytest tests/test_smoke_browser.py -v` |
 | `src/extraction/*.py` | `pytest tests/test_smoke_extraction.py tests/test_integration_parsing.py -v` |
+| `src/searchers/job_boards/*.py` | `pytest tests/test_job_board_parsers.py -v` |
 
 ### Добавление тестового сайта
 
