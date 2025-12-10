@@ -630,5 +630,97 @@ class Test3ssParsing:
         assert "glassdoor" in html.lower()
 
 
+class Test4ddWerbeagenturParsing:
+    """Test parsing 4dd-werbeagentur.de - Custom site (Advertising agency).
+    
+    4DD communication GmbH is a full-service advertising agency in Düsseldorf.
+    Custom corporate website, uses LLM extraction - no specialized parser.
+    Notable: All jobs link to same #bewerben anchor (application form).
+    Source: https://4dd-werbeagentur.de/karriere/
+    """
+    
+    @pytest.mark.asyncio
+    async def test_llm_extracts_jobs_from_4dd(self):
+        """Should extract jobs via LLM (no Schema.org on this site)."""
+        html = load_fixture("4dd_werbeagentur_jobs.html")
+        
+        async def mock_llm(html, url):
+            return [
+                {"title": "Social Media Manager / Texter (m/w/d)", "location": "Düsseldorf", "url": "/karriere/#bewerben"},
+                {"title": "Praktikant:in – Social Media & Redaktion (m/w/d)", "location": "Düsseldorf", "url": "/karriere/#bewerben"},
+                {"title": "Grafikdesigner (m/w/d)", "location": "Düsseldorf", "url": "/karriere/#bewerben"},
+                {"title": "BERATER / PROJEKTMANAGER (M/W/D)", "location": "Düsseldorf", "url": "/karriere/#bewerben"},
+                {"title": "Kontakter / Kundenakquise (M/W/D)", "location": "Düsseldorf", "url": "/karriere/#bewerben"},
+            ]
+        
+        extractor = HybridJobExtractor(llm_extract_fn=mock_llm)
+        jobs = await extractor.extract(html, "https://4dd-werbeagentur.de")
+        
+        assert len(jobs) == 5
+        
+        titles = {j["title"] for j in jobs}
+        assert "Social Media Manager / Texter (m/w/d)" in titles
+        assert "Grafikdesigner (m/w/d)" in titles
+        assert "BERATER / PROJEKTMANAGER (M/W/D)" in titles
+    
+    def test_4dd_html_has_job_content(self):
+        """Verify the fixture contains expected job content."""
+        html = load_fixture("4dd_werbeagentur_jobs.html")
+        
+        # Check job-related content
+        assert "Social Media Manager / Texter (m/w/d)" in html
+        assert "Praktikant:in" in html
+        assert "Grafikdesigner (m/w/d)" in html
+        assert "BERATER / PROJEKTMANAGER" in html
+        assert "Kontakter / Kundenakquise" in html
+        
+        # Check company context
+        assert "4DD" in html
+        assert "Düsseldorf" in html
+        assert "Werbeagentur" in html
+        
+        # Check page structure
+        assert "job-item" in html
+        assert "job-listings" in html
+        assert "#bewerben" in html
+    
+    def test_4dd_no_schema_org(self):
+        """4dd-werbeagentur.de should not have Schema.org (falls back to LLM)."""
+        html = load_fixture("4dd_werbeagentur_jobs.html")
+        strategy = SchemaOrgStrategy()
+        
+        candidates = strategy.extract(html, "https://4dd-werbeagentur.de")
+        
+        assert len(candidates) == 0
+    
+    def test_clean_html_preserves_4dd_jobs(self):
+        """HTML cleaning should preserve job content from 4dd-werbeagentur.de."""
+        html = load_fixture("4dd_werbeagentur_jobs.html")
+        provider = MockLLMProvider()
+        
+        clean = provider._clean_html(html)
+        
+        # Job titles should be preserved
+        assert "Social Media Manager" in clean
+        assert "Grafikdesigner" in clean
+        assert "Texter" in clean
+        assert "(m/w/d)" in clean
+    
+    def test_4dd_all_jobs_link_to_form(self):
+        """All jobs link to same #bewerben form anchor.
+        
+        This is a common pattern for small agencies - jobs don't have
+        individual pages, just an application form at the bottom.
+        """
+        html = load_fixture("4dd_werbeagentur_jobs.html")
+        
+        # All apply buttons point to form anchor
+        assert html.count('href="#bewerben"') >= 5
+        
+        # Form section exists
+        assert 'id="bewerben"' in html
+        assert "Bewerbung absenden" in html
+
+
 # Run with: pytest tests/test_integration_parsing.py -v
 
