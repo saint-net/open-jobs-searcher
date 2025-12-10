@@ -193,6 +193,7 @@ class WebsiteSearcher(BaseSearcher):
         # Deduplicate by URL (primary) or (title, location) (fallback)
         seen = set()
         unique_jobs_data = []
+        base_page = (working_url.url if working_url else url).rstrip('/')
         for job_data in all_jobs_data:
             job_url = job_data.get("url", "")
             # Handle None or "None" as empty
@@ -200,6 +201,17 @@ class WebsiteSearcher(BaseSearcher):
                 job_url = ""
             else:
                 job_url = str(job_url).strip()
+            
+            # Treat non-unique URLs as empty:
+            # - URL is same as current page
+            # - URL ends with # (anchor without ID)
+            # - URL is current page + #
+            if job_url:
+                job_url_clean = job_url.rstrip('/')
+                if (job_url_clean == base_page or 
+                    job_url.endswith('#') or 
+                    job_url_clean == base_page + '#'):
+                    job_url = ""
             
             title_loc_key = (
                 self._normalize_title(job_data.get("title", "")),
@@ -737,6 +749,18 @@ class WebsiteSearcher(BaseSearcher):
                         job_url = ""
                     else:
                         job_url = str(job_url).strip()
+                    
+                    # Treat non-unique URLs as empty:
+                    # - URL is same as current page
+                    # - URL ends with # (anchor without ID)
+                    # - URL is current page + #
+                    if job_url:
+                        base_page = current_url.rstrip('/')
+                        job_url_clean = job_url.rstrip('/')
+                        if (job_url_clean == base_page or 
+                            job_url.endswith('#') or 
+                            job_url_clean == base_page + '#'):
+                            job_url = ""
                     
                     # Fallback key: (title, location) for jobs without URL
                     title_loc_key = (

@@ -722,5 +722,84 @@ class Test4ddWerbeagenturParsing:
         assert "Bewerbung absenden" in html
 
 
+class Test4zeroParsing:
+    """Tests for 4zero.solutions - Webflow site with all jobs linking to href='#'."""
+    
+    async def test_llm_extracts_jobs_from_4zero(self):
+        """Should extract jobs via LLM (no Schema.org on this site)."""
+        html = load_fixture("4zero_jobs.html")
+        
+        async def mock_llm(html, url):
+            return [
+                {"title": "Grafik / Design (m/w/d)", "location": "München", "url": "#"},
+                {"title": "Software Web Frontend Engineer", "location": "worldwide", "url": "#"},
+                {"title": "Software Web Backend Engineer", "location": "worldwide", "url": "#"},
+                {"title": "Software Developer", "location": "Germany", "url": "#"},
+            ]
+        
+        extractor = HybridJobExtractor(llm_extract_fn=mock_llm)
+        jobs = await extractor.extract(html, "https://www.4zero.solutions/job")
+        
+        assert len(jobs) >= 4
+        titles = [j.get("title", "") for j in jobs]
+        assert any("Grafik" in t or "Design" in t for t in titles)
+        assert any("Frontend" in t for t in titles)
+        assert any("Backend" in t for t in titles)
+        assert any("Software Developer" in t for t in titles)
+    
+    def test_4zero_html_has_job_content(self):
+        """4zero.solutions HTML should contain job listings."""
+        html = load_fixture("4zero_jobs.html")
+        
+        # Check page content
+        assert "Jobs @ 4zero" in html or "Job Listings" in html
+        assert "Grafik / Design (m/w/d)" in html
+        assert "Software Web Frontend Engineer" in html
+        assert "Software Web Backend Engineer" in html
+        assert "Software Developer" in html
+        
+        # Check locations
+        assert "München" in html
+        assert "worldwide" in html
+        assert "Germany" in html
+    
+    def test_4zero_no_schema_org(self):
+        """4zero.solutions should not have Schema.org (falls back to LLM)."""
+        html = load_fixture("4zero_jobs.html")
+        strategy = SchemaOrgStrategy()
+        
+        candidates = strategy.extract(html, "https://www.4zero.solutions/job")
+        
+        assert len(candidates) == 0
+    
+    def test_clean_html_preserves_4zero_jobs(self):
+        """HTML cleaning should preserve job content from 4zero.solutions."""
+        html = load_fixture("4zero_jobs.html")
+        provider = MockLLMProvider()
+        
+        clean = provider._clean_html(html)
+        
+        # Job titles should be preserved
+        assert "Grafik" in clean or "Design" in clean
+        assert "Frontend" in clean
+        assert "Backend" in clean
+        assert "Software Developer" in clean
+    
+    def test_4zero_all_jobs_link_to_hash(self):
+        """All jobs link to href='#' - no individual job pages.
+        
+        This is why deduplication by URL was failing - all jobs had same key.
+        Fixed by treating href='#' as non-unique and using (title, location) fallback.
+        """
+        html = load_fixture("4zero_jobs.html")
+        
+        # All job cards have href="#"
+        assert 'href="#"' in html
+        
+        # Jobs are in card structure
+        assert "job-listing-card" in html
+        assert "job-listing-title" in html
+
+
 # Run with: pytest tests/test_integration_parsing.py -v
 
