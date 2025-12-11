@@ -3,7 +3,7 @@
 import pytest
 from urllib.parse import urlparse
 
-from src.searchers.website import WebsiteSearcher
+from src.searchers.job_filters import filter_jobs_by_search_query
 
 
 class TestDomainNormalization:
@@ -49,16 +49,9 @@ class TestDomainNormalization:
 
 
 class TestFilterJobsBySearchQuery:
-    """Test _filter_jobs_by_search_query method."""
+    """Test filter_jobs_by_search_query function."""
     
-    @pytest.fixture
-    def searcher(self):
-        """Create WebsiteSearcher instance with mock LLM."""
-        from unittest.mock import MagicMock
-        mock_llm = MagicMock()
-        return WebsiteSearcher(llm_provider=mock_llm, use_browser=False, use_cache=False)
-    
-    def test_no_query_param_returns_all(self, searcher):
+    def test_no_query_param_returns_all(self):
         """URL without search param should return all jobs."""
         jobs = [
             {"title": "Software Engineer"},
@@ -66,10 +59,10 @@ class TestFilterJobsBySearchQuery:
         ]
         url = "https://company.com/careers"
         
-        result = searcher._filter_jobs_by_search_query(jobs, url)
+        result = filter_jobs_by_search_query(jobs, url)
         assert len(result) == 2
     
-    def test_query_param_filters_by_title(self, searcher):
+    def test_query_param_filters_by_title(self):
         """URL with ?q=term should filter jobs by title."""
         jobs = [
             {"title": "Software Engineer"},
@@ -78,13 +71,13 @@ class TestFilterJobsBySearchQuery:
         ]
         url = "https://jobs.company.com/search?q=software"
         
-        result = searcher._filter_jobs_by_search_query(jobs, url)
+        result = filter_jobs_by_search_query(jobs, url)
         # Should keep jobs with "software" in title
         assert len(result) == 2
         assert result[0]["title"] == "Software Engineer"
         assert result[1]["title"] == "Senior Software Developer"
     
-    def test_no_matches_returns_all(self, searcher):
+    def test_no_matches_returns_all(self):
         """If no jobs match search term, return all (fallback)."""
         jobs = [
             {"title": "Software Engineer"},
@@ -92,30 +85,24 @@ class TestFilterJobsBySearchQuery:
         ]
         url = "https://jobs.company.com/search?q=nonexistent"
         
-        result = searcher._filter_jobs_by_search_query(jobs, url)
+        result = filter_jobs_by_search_query(jobs, url)
         # Should return all when nothing matches
         assert len(result) == 2
     
-    def test_search_param_variations(self, searcher):
+    def test_search_param_variations(self):
         """Test different search parameter names."""
         jobs = [{"title": "Python Developer"}, {"title": "Java Developer"}]
         
         # Test 'search' param
-        result = searcher._filter_jobs_by_search_query(
-            jobs, "https://example.com?search=python"
-        )
+        result = filter_jobs_by_search_query(jobs, "https://example.com?search=python")
         assert len(result) == 1
         
         # Test 'query' param
-        result = searcher._filter_jobs_by_search_query(
-            jobs, "https://example.com?query=python"
-        )
+        result = filter_jobs_by_search_query(jobs, "https://example.com?query=python")
         assert len(result) == 1
         
         # Test 'keyword' param
-        result = searcher._filter_jobs_by_search_query(
-            jobs, "https://example.com?keyword=java"
-        )
+        result = filter_jobs_by_search_query(jobs, "https://example.com?keyword=java")
         assert len(result) == 1
 
 

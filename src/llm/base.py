@@ -535,23 +535,14 @@ class BaseLLMProvider(ABC):
             HTML string of job section, or None if not found
         """
         # Check if this is an Odoo site first (most reliable detection)
-        if self._is_odoo_site(soup):
+        # Import inside method to avoid circular import (base.py -> odoo.py -> searchers -> base.py)
+        from src.searchers.job_boards.odoo import OdooParser
+        
+        if OdooParser.is_odoo_site(soup):
             logger.debug("Detected Odoo site, using Odoo-specific selectors")
-            odoo_selectors = [
-                '.o_website_hr_recruitment_jobs_list',
-                '.oe_website_jobs', 
-                '[class*="o_website_hr"]',
-                '[class*="oe_website_jobs"]',
-            ]
-            for selector in odoo_selectors:
-                try:
-                    elements = soup.select(selector)
-                    for el in elements:
-                        html = str(el)
-                        if 1000 < len(html) < 200000:
-                            return html
-                except Exception:
-                    continue
+            odoo_html = OdooParser.find_job_section(soup)
+            if odoo_html:
+                return odoo_html
         
         # Try generic selectors for other platforms
         candidates = []
@@ -585,20 +576,6 @@ class BaseLLMProvider(ABC):
             return candidates[0][1]
             
         return None
-        
-        return None
-    
-    def _is_odoo_site(self, soup) -> bool:
-        """Check if site is running Odoo CMS.
-        
-        Odoo adds a meta generator tag to all pages.
-        This is the most reliable way to detect Odoo sites.
-        """
-        generator = soup.find('meta', attrs={'name': 'generator'})
-        if generator:
-            content = generator.get('content', '') or ''
-            return 'odoo' in content.lower()
-        return False
     
     def _is_non_job_entry(self, title: str) -> bool:
         """Check if title is a non-job entry (open application, etc.)."""

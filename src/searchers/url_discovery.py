@@ -368,6 +368,90 @@ class CareerUrlDiscovery:
             f"{base}/company/vacancies",
         ]
 
+    async def fetch_all_sitemap_urls(self, base_url: str, max_urls: int = 300) -> list[str]:
+        """Fetch all URLs from sitemap.xml (checking robots.txt first).
+        
+        Unlike find_from_sitemap, this returns ALL URLs without filtering.
+        Useful for LLM analysis of the entire sitemap.
+        
+        Args:
+            base_url: Base URL of the website
+            max_urls: Maximum number of URLs to return
+            
+        Returns:
+            List of all URLs from sitemap
+        """
+        base = base_url.rstrip('/')
+        all_urls = []
+        
+        # 1. Try to find sitemap location in robots.txt
+        sitemap_locations = []
+        try:
+            robots_txt = await self.http_client.fetch(f"{base}/robots.txt")
+            if robots_txt:
+                for line in robots_txt.split('\n'):
+                    line = line.strip()
+                    if line.lower().startswith('sitemap:'):
+                        sitemap_url = line.split(':', 1)[1].strip()
+                        sitemap_locations.append(sitemap_url)
+                        logger.debug(f"Found sitemap in robots.txt: {sitemap_url}")
+        except Exception as e:
+            logger.debug(f"robots.txt check failed: {e}")
+        
+        # 2. Add standard locations as fallback
+        standard_locations = [
+            f"{base}/sitemap.xml",
+            f"{base}/sitemap_index.xml",
+        ]
+        for loc in standard_locations:
+            if loc not in sitemap_locations:
+                sitemap_locations.append(loc)
+        
+        # 3. Parse sitemaps (try each location)
+        for sitemap_url in sitemap_locations[:3]:  # Limit to 3 sitemaps
+            try:
+                response = await self.http_client.fetch(sitemap_url)
+                if not response:
+                    continue
+                
+                content = response.strip()
+                if not content.startswith('<?xml') and not content.startswith('<'):
+                    logger.debug(f"Sitemap {sitemap_url} is not XML")
+                    continue
+                
+                root = ET.fromstring(content)
+                
+                # Check if this is a sitemap index
+                ns = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+                nested_sitemaps = root.findall('.//sm:sitemap/sm:loc', ns)
+                if not nested_sitemaps:
+                    nested_sitemaps = root.findall('.//sitemap/loc')
+                
+                if nested_sitemaps:
+                    # Parse nested sitemaps
+                    for nested in nested_sitemaps[:2]:
+                        if nested.text:
+                            nested_urls = await self._parse_sitemap_urls(nested.text)
+                            all_urls.extend(nested_urls)
+                            if len(all_urls) >= max_urls:
+                                break
+                else:
+                    # Direct sitemap with URLs
+                    for elem in root.iter():
+                        if elem.tag.endswith('loc') and elem.text:
+                            all_urls.append(elem.text)
+                
+                if all_urls:
+                    logger.debug(f"Found {len(all_urls)} URLs from sitemap(s)")
+                    break
+                    
+            except ET.ParseError as e:
+                logger.debug(f"XML parse error for {sitemap_url}: {e}")
+            except Exception as e:
+                logger.debug(f"Sitemap {sitemap_url} failed: {e}")
+        
+        return all_urls[:max_urls]
+
     def generate_url_variants(self, url: str) -> list[str]:
         """Generate plural/singular variants of a careers URL.
         

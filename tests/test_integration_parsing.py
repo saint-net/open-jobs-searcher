@@ -220,14 +220,15 @@ class TestOdooSiteDetection:
     """Test Odoo CMS detection and parsing."""
     
     def test_detects_odoo_by_generator_meta(self):
-        """Should detect Odoo site by meta generator tag."""
+        """Should detect Odoo site by meta generator tag via OdooParser."""
         from bs4 import BeautifulSoup
+        from src.searchers.job_boards.odoo import OdooParser
         
         html = load_fixture("odoo_jobs.html")
-        provider = MockLLMProvider()
         soup = BeautifulSoup(html, 'lxml')
         
-        assert provider._is_odoo_site(soup) is True
+        # OdooParser is now the source of truth for Odoo detection
+        assert OdooParser.is_odoo_site(soup) is True
     
     def test_finds_odoo_job_section(self):
         """Should find Odoo job section by specific selectors."""
@@ -1030,17 +1031,13 @@ class Test8comFilteringScenario:
     
     def test_query_param_should_not_filter_on_same_domain(self):
         """?q=Center should NOT filter jobs on 8com.de."""
-        from src.searchers.website import WebsiteSearcher
-        from unittest.mock import MagicMock
+        from src.searchers.job_filters import filter_jobs_by_search_query
         
-        # The key insight: _filter_jobs_by_search_query is only called
+        # The key insight: filter_jobs_by_search_query is only called
         # when navigated_to_external=True. For 8com.de -> www.8com.de,
         # navigated_to_external should be False (same domain after normalization).
         
-        mock_llm = MagicMock()
-        searcher = WebsiteSearcher(llm_provider=mock_llm, use_browser=False, use_cache=False)
-        
-        # If this method WERE called, it would filter by "center"
+        # If this function WERE called, it would filter by "center"
         jobs = [
             {"title": "SIEM Engineer für SOC"},  # has no "center"
             {"title": "Service Manager für Security Operations Center"},  # has "center"
@@ -1051,7 +1048,7 @@ class Test8comFilteringScenario:
         # But since we're on same domain, this filter should NOT be applied
         # So in the actual flow, all 4 jobs are returned
         # This test verifies the filter behavior in isolation
-        filtered = searcher._filter_jobs_by_search_query(
+        filtered = filter_jobs_by_search_query(
             jobs, "https://www.8com.de/offene-stellen?q=Center"
         )
         

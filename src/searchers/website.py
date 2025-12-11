@@ -5,8 +5,6 @@ import re
 from typing import Optional
 from urllib.parse import urlparse, parse_qs
 
-from rich.console import Console
-
 from src.models import Job
 from src.searchers.base import BaseSearcher
 from src.searchers.http_client import AsyncHttpClient
@@ -16,14 +14,19 @@ from src.searchers.job_boards import (
     detect_job_board_platform,
     find_external_job_board,
 )
+from src.searchers.job_filters import (
+    normalize_title,
+    normalize_location,
+    filter_jobs_by_search_query,
+    filter_jobs_by_source_company,
+)
+from src.searchers.job_extraction import JobExtractor
 from src.llm.base import BaseLLMProvider
 from src.browser import DomainUnreachableError, PlaywrightBrowsersNotInstalledError
 from src.database import JobRepository
 from src.database.models import SyncResult
-from src.extraction.strategies import PdfLinkStrategy, SchemaOrgStrategy
 
 logger = logging.getLogger(__name__)
-console = Console()
 
 
 class WebsiteSearcher(BaseSearcher):
@@ -52,6 +55,7 @@ class WebsiteSearcher(BaseSearcher):
         self.headless = headless
         self.use_cache = use_cache
         self._browser_loader = None
+        self._job_extractor = None
         
         # Last sync result (for reporting new/removed jobs)
         self.last_sync_result: Optional[SyncResult] = None
@@ -71,6 +75,17 @@ class WebsiteSearcher(BaseSearcher):
             self._browser_loader = BrowserLoader(headless=self.headless)
             await self._browser_loader.start()
         return self._browser_loader
+
+    def _get_job_extractor(self) -> JobExtractor:
+        """Get or create JobExtractor."""
+        if self._job_extractor is None:
+            self._job_extractor = JobExtractor(
+                llm_provider=self.llm,
+                job_board_parsers=self.job_board_parsers,
+                fetch_with_page=self._fetch_with_page_object,
+                fetch_jobs_from_api=self._fetch_jobs_from_api,
+            )
+        return self._job_extractor
 
     async def search(
         self,
@@ -169,7 +184,7 @@ class WebsiteSearcher(BaseSearcher):
         for career_url in career_urls:
             try:
                 logger.debug(f"Trying cached URL: {career_url.url}")
-                jobs_data = await self._extract_jobs_from_url(career_url.url, url)
+                jobs_data = await self._get_job_extractor().extract_jobs(career_url.url, url)
                 
                 if jobs_data:
                     all_jobs_data.extend(jobs_data)
@@ -203,7 +218,7 @@ class WebsiteSearcher(BaseSearcher):
             if career_domain != source_domain and career_domain != f"www.{source_domain}":
                 # External career portal - filter by source company
                 logger.debug(f"Filtering jobs from external portal {career_domain} for {source_domain}")
-                all_jobs_data = self._filter_jobs_by_source_company(all_jobs_data, url)
+                all_jobs_data = filter_jobs_by_source_company(all_jobs_data, url)
         
         # Deduplicate by URL (primary) or (title, location) (fallback)
         seen = set()
@@ -229,8 +244,8 @@ class WebsiteSearcher(BaseSearcher):
                     job_url = ""
             
             title_loc_key = (
-                self._normalize_title(job_data.get("title", "")),
-                self._normalize_location(job_data.get("location", ""))
+                normalize_title(job_data.get("title", "")),
+                normalize_location(job_data.get("location", ""))
             )
             
             # Use URL as key if available, otherwise title+location
@@ -350,7 +365,7 @@ class WebsiteSearcher(BaseSearcher):
         try:
             # 1. Load main page and sitemap URLs for LLM analysis
             html = await self._fetch(url)
-            sitemap_urls = await self._fetch_sitemap_urls(url)
+            sitemap_urls = await self.url_discovery.fetch_all_sitemap_urls(url)
             
             # 2. LLM analyzes HTML + sitemap to find careers URL
             if html:
@@ -480,13 +495,13 @@ class WebsiteSearcher(BaseSearcher):
                             context_obj = None
                         
                         # Extract jobs with pagination
-                        jobs_data = await self._extract_jobs_from_url(variant_url, url)
+                        jobs_data = await self._get_job_extractor().extract_jobs(variant_url, url)
                     
                     # Filter jobs by source company and search query (for multi-company career portals)
                     # Only applies to external job boards, not internal navigation
                     if navigated_to_external and jobs_data:
-                        jobs_data = self._filter_jobs_by_search_query(jobs_data, variant_url)
-                        jobs_data = self._filter_jobs_by_source_company(jobs_data, url)
+                        jobs_data = filter_jobs_by_search_query(jobs_data, variant_url)
+                        jobs_data = filter_jobs_by_source_company(jobs_data, url)
                     
                     if jobs_data:
                         careers_url = variant_url
@@ -729,200 +744,6 @@ class WebsiteSearcher(BaseSearcher):
             logger.warning(f"Error fetching jobs from API {api_url}: {e}")
             return []
 
-    # Maximum pages to scan (to avoid infinite loops)
-    MAX_PAGINATION_PAGES = 3
-
-    async def _extract_jobs_from_url(self, careers_url: str, original_url: str) -> list[dict]:
-        """Extract jobs from a careers URL with pagination support.
-        
-        Args:
-            careers_url: URL of careers/jobs page
-            original_url: Original company URL (for filtering)
-            
-        Returns:
-            List of job dictionaries from all pages (up to MAX_PAGINATION_PAGES)
-        """
-        all_jobs_data = []
-        current_url = careers_url
-        pages_visited = 0
-        seen_job_keys = set()  # Track unique jobs by (title, location) to detect duplicates
-        
-        while pages_visited < self.MAX_PAGINATION_PAGES:
-            pages_visited += 1
-            
-            jobs_data, next_page_url = await self._extract_jobs_from_single_page(
-                current_url, original_url
-            )
-            
-            if jobs_data:
-                # Check how many jobs are actually new (not duplicates)
-                # Use URL in key for multi-company portals where same title exists
-                new_jobs = []
-                for job in jobs_data:
-                    # Primary key: URL (most reliable)
-                    job_url = job.get("url", "")
-                    # Handle None or "None" as empty
-                    if job_url is None or job_url == "None" or job_url == "null":
-                        job_url = ""
-                    else:
-                        job_url = str(job_url).strip()
-                    
-                    # Treat non-unique URLs as empty:
-                    # - URL is same as current page
-                    # - URL ends with # (anchor without ID)
-                    # - URL is current page + #
-                    if job_url:
-                        base_page = current_url.rstrip('/')
-                        job_url_clean = job_url.rstrip('/')
-                        if (job_url_clean == base_page or 
-                            job_url.endswith('#') or 
-                            job_url_clean == base_page + '#'):
-                            job_url = ""
-                    
-                    # Fallback key: (title, location) for jobs without URL
-                    title_loc_key = (
-                        self._normalize_title(job.get("title", "")),
-                        self._normalize_location(job.get("location", ""))
-                    )
-                    
-                    # Use URL as key if available, otherwise title+location
-                    job_key = job_url if job_url else title_loc_key
-                    
-                    if job_key not in seen_job_keys:
-                        seen_job_keys.add(job_key)
-                        new_jobs.append(job)
-                    else:
-                        logger.debug(f"Duplicate job skipped: {job.get('title', '')[:40]} | key={job_key if isinstance(job_key, str) else job_key[0][:30]}")
-                
-                if new_jobs:
-                    all_jobs_data.extend(new_jobs)
-                    logger.debug(f"Page {pages_visited}: found {len(new_jobs)} new jobs ({len(jobs_data)} total on page)")
-                else:
-                    # All jobs on this page are duplicates - we've looped back
-                    logger.debug(f"Page {pages_visited}: all {len(jobs_data)} jobs are duplicates, stopping pagination")
-                    break
-            
-            # Check if there are more pages
-            if not next_page_url:
-                break
-            
-            # Check if we've hit the pagination limit
-            if pages_visited >= self.MAX_PAGINATION_PAGES:
-                # Log warning about more pages available
-                logger.warning(
-                    f"Pagination limit reached ({self.MAX_PAGINATION_PAGES} pages). "
-                    f"There may be more jobs at: {next_page_url}"
-                )
-                # Also print to console for visibility
-                print(
-                    f"⚠️  Достигнут лимит страниц ({self.MAX_PAGINATION_PAGES}). "
-                    f"Возможно есть ещё вакансии: {next_page_url}"
-                )
-                break
-            
-            current_url = next_page_url
-        
-        if pages_visited > 1:
-            logger.info(f"Total: {len(all_jobs_data)} unique jobs from {pages_visited} pages")
-        
-        return all_jobs_data
-
-    async def _extract_jobs_from_single_page(
-        self, careers_url: str, original_url: str
-    ) -> tuple[list[dict], Optional[str]]:
-        """Extract jobs from a single page.
-        
-        Args:
-            careers_url: URL of careers/jobs page
-            original_url: Original company URL (for filtering)
-            
-        Returns:
-            Tuple of (jobs_data, next_page_url)
-        """
-        jobs_data = []
-        next_page_url = None
-        page_obj = None
-        context_obj = None
-        
-        try:
-            # Load page - navigate to jobs only for base URL without query params
-            # (pages with ?page=N should load directly without navigation)
-            has_query = '?' in careers_url
-            
-            # Load page with page object for accessibility tree
-            html, final_url, page_obj, context_obj = await self._fetch_with_page_object(
-                careers_url, navigate_to_jobs=not has_query
-            )
-            final_url = final_url or careers_url
-            
-            if not html:
-                return [], None
-            
-            # Check for external job board
-            external_platform = detect_job_board_platform(final_url, html)
-            if not external_platform:
-                external_board_url = find_external_job_board(html)
-                if external_board_url:
-                    external_platform = detect_job_board_platform(external_board_url)
-                    # Close current page and load external board
-                    if page_obj:
-                        await page_obj.close()
-                    if context_obj:
-                        await context_obj.close()
-                    
-                    html, _, page_obj, context_obj = await self._fetch_with_page_object(external_board_url)
-                    if not html:
-                        return [], None
-                    final_url = external_board_url
-            
-            # Extract jobs using parser or LLM with pagination
-            if external_platform:
-                # Check if platform requires API call (e.g., Recruitee)
-                if self.job_board_parsers.is_api_based(external_platform):
-                    jobs_data = await self._fetch_jobs_from_api(final_url, external_platform)
-                else:
-                    jobs_data = self.job_board_parsers.parse(html, final_url, external_platform)
-                # No pagination for external platforms (they handle it themselves)
-            else:
-                # Try high-accuracy strategies first (Schema.org, PDF links)
-                schema_strategy = SchemaOrgStrategy()
-                schema_candidates = schema_strategy.extract(html, final_url)
-                if schema_candidates:
-                    jobs_data = [c.to_dict() for c in schema_candidates]
-                    logger.debug(f"Schema.org extracted {len(jobs_data)} jobs")
-                else:
-                    pdf_strategy = PdfLinkStrategy()
-                    pdf_candidates = pdf_strategy.extract(html, final_url)
-                    if pdf_candidates:
-                        jobs_data = [c.to_dict() for c in pdf_candidates]
-                        logger.debug(f"PdfLinkStrategy extracted {len(jobs_data)} jobs")
-                    else:
-                        # Use LLM extraction with pagination support
-                        result = await self.llm.extract_jobs_with_pagination(html, final_url)
-                        jobs_data = result.get("jobs", [])
-                        next_page_url = result.get("next_page_url")
-            
-            logger.debug(f"Extracted {len(jobs_data)} jobs from {final_url}")
-            return jobs_data, next_page_url
-            
-        except Exception as e:
-            error_msg = f"Error extracting jobs from {careers_url}: {e}"
-            logger.warning(error_msg)
-            console.print(f"[bold red]❌ {error_msg}[/bold red]")
-            return [], None
-        finally:
-            # Clean up page and context
-            if page_obj:
-                try:
-                    await page_obj.close()
-                except Exception:
-                    pass
-            if context_obj:
-                try:
-                    await context_obj.close()
-                except Exception:
-                    pass
-
     def _extract_company_name(self, url: str) -> str:
         """Extract company name from URL."""
         parsed = urlparse(url)
@@ -933,166 +754,6 @@ class WebsiteSearcher(BaseSearcher):
         name = re.sub(r'\.(com|ru|org|net|io|co|tech)$', '', name)
         
         return name.title()
-    
-    def _normalize_title(self, title: str) -> str:
-        """Normalize job title for deduplication.
-        
-        Removes gender notation and normalizes whitespace.
-        """
-        result = title.lower().strip()
-        
-        # Remove gender notation: (m/w/d), (f/d/m), etc.
-        result = re.sub(r'\s*\([mwfdx/]+\)\s*', ' ', result)
-        result = re.sub(r'\s+[mwfdx]/[mwfdx](/[mwfdx])?\s*$', '', result)
-        
-        # Normalize whitespace
-        result = re.sub(r'\s+', ' ', result).strip()
-        
-        return result
-    
-    def _normalize_location(self, location: str) -> str:
-        """Normalize location for deduplication.
-        
-        Removes country suffixes and employment type indicators.
-        """
-        result = location.lower().strip()
-        
-        # Remove country suffixes
-        countries = [
-            r',?\s*deutschland\s*$',
-            r',?\s*germany\s*$',
-            r',?\s*österreich\s*$',
-            r',?\s*austria\s*$',
-            r',?\s*schweiz\s*$',
-            r',?\s*switzerland\s*$',
-        ]
-        for pattern in countries:
-            result = re.sub(pattern, '', result, flags=re.IGNORECASE)
-        
-        # Remove employment type suffixes
-        employment = [
-            r',?\s*vollzeit\s*$',
-            r',?\s*teilzeit\s*$',
-            r',?\s*inkl\.?\s*home\s*office\s*$',
-        ]
-        for pattern in employment:
-            result = re.sub(pattern, '', result, flags=re.IGNORECASE)
-        
-        # Normalize whitespace
-        result = re.sub(r'\s+', ' ', result).strip()
-        result = result.rstrip(',').strip()
-        
-        return result
-
-    def _filter_jobs_by_search_query(self, jobs_data: list[dict], url: str) -> list[dict]:
-        """Filter jobs to only those matching the search query in URL.
-        
-        When navigating to a job board search page (e.g., job.deloitte.com/search?search=27pilots),
-        the page may show both search results AND recommended/featured jobs.
-        This method filters to keep only jobs that match the search query.
-        
-        Args:
-            jobs_data: List of job dictionaries
-            url: Current page URL
-            
-        Returns:
-            Filtered list of jobs matching the search query
-        """
-        if not jobs_data:
-            return jobs_data
-        
-        parsed = urlparse(url)
-        query_params = parse_qs(parsed.query)
-        
-        # Check for common search parameter names
-        search_term = None
-        for param_name in ['search', 'q', 'query', 'keyword', 'keywords']:
-            if param_name in query_params:
-                search_term = query_params[param_name][0].lower()
-                break
-        
-        if not search_term:
-            return jobs_data
-        
-        # Filter jobs that contain the search term in their title
-        filtered = []
-        for job in jobs_data:
-            title = job.get('title', '').lower()
-            if search_term in title:
-                filtered.append(job)
-        
-        if filtered:
-            logger.debug(f"Filtered jobs by search term '{search_term}': {len(jobs_data)} -> {len(filtered)}")
-            return filtered
-        
-        # If no jobs match, return all (search might be for company name/tag not in title)
-        logger.debug(f"No jobs matched search term '{search_term}', keeping all {len(jobs_data)}")
-        return jobs_data
-
-    def _filter_jobs_by_source_company(self, jobs_data: list[dict], source_url: str) -> list[dict]:
-        """Filter jobs to only those related to the source company.
-        
-        When navigating from a company website (e.g., 2rsoftware.de) to a 
-        multi-company career portal (e.g., karriere.synqony.com), filter
-        jobs to only show positions from the original company.
-        
-        Args:
-            jobs_data: List of job dictionaries
-            source_url: Original company website URL
-            
-        Returns:
-            Filtered list of jobs (or all jobs if no matches found)
-        """
-        if not jobs_data:
-            return jobs_data
-        
-        # Extract company identifier from source URL
-        parsed = urlparse(source_url)
-        domain = parsed.netloc.replace('www.', '')
-        
-        # Get company name variants from domain
-        # e.g., "2rsoftware.de" -> ["2rsoftware", "2r software", "2r"]
-        company_base = domain.split('.')[0]  # "2rsoftware"
-        company_variants = [
-            company_base.lower(),  # "2rsoftware"
-            company_base.lower().replace('-', ' '),  # for domains like "my-company"
-        ]
-        
-        # Add common variations for company names
-        # Split camelCase or numbers: "2rsoftware" -> "2r software", "2r"
-        # Also handle "XYZcompany" -> "xyz company", "xyz"
-        import re
-        # Try to split at number-letter boundary: "2rsoftware" -> "2r", "software"
-        match = re.match(r'^(\d+[a-z]?)(.*)$', company_base.lower())
-        if match:
-            prefix = match.group(1)  # "2r"
-            suffix = match.group(2)  # "software"
-            company_variants.append(f"{prefix} {suffix}")  # "2r software"
-            company_variants.append(prefix)  # "2r"
-        
-        # Filter jobs that mention the source company
-        filtered = []
-        for job in jobs_data:
-            job_text = (
-                job.get('title', '') + ' ' + 
-                job.get('location', '') + ' ' +
-                job.get('description', '') + ' ' +
-                job.get('company', '')  # Company name from job card
-            ).lower()
-            
-            # Check if any company variant is mentioned
-            for variant in company_variants:
-                if variant in job_text:
-                    filtered.append(job)
-                    break
-        
-        if filtered:
-            logger.debug(f"Filtered jobs by source company: {len(jobs_data)} -> {len(filtered)}")
-            return filtered
-        
-        # If no matches, return all jobs (company name might not be in job text)
-        logger.debug(f"No jobs matched source company variants {company_variants}, keeping all {len(jobs_data)}")
-        return jobs_data
 
     async def close(self):
         """Close HTTP client, browser, LLM provider and database."""
@@ -1108,112 +769,3 @@ class WebsiteSearcher(BaseSearcher):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
-
-    async def _fetch_sitemap_urls(self, base_url: str) -> list[str]:
-        """Fetch URLs from sitemap.xml (checking robots.txt first for sitemap location).
-        
-        Args:
-            base_url: Base URL of the website
-            
-        Returns:
-            List of URLs from sitemap
-        """
-        import xml.etree.ElementTree as ET
-        
-        base = base_url.rstrip('/')
-        all_urls = []
-        
-        # 1. Try to find sitemap location in robots.txt
-        sitemap_locations = []
-        try:
-            robots_txt = await self.http_client.fetch(f"{base}/robots.txt")
-            if robots_txt:
-                for line in robots_txt.split('\n'):
-                    line = line.strip()
-                    if line.lower().startswith('sitemap:'):
-                        sitemap_url = line.split(':', 1)[1].strip()
-                        sitemap_locations.append(sitemap_url)
-                        logger.debug(f"Found sitemap in robots.txt: {sitemap_url}")
-        except Exception as e:
-            logger.debug(f"robots.txt check failed: {e}")
-        
-        # 2. Always add standard locations as fallback (even if robots.txt has sitemaps)
-        standard_locations = [
-            f"{base}/sitemap.xml",
-            f"{base}/sitemap_index.xml",
-        ]
-        for loc in standard_locations:
-            if loc not in sitemap_locations:
-                sitemap_locations.append(loc)
-        
-        # 3. Parse sitemaps (try each location)
-        for sitemap_url in sitemap_locations[:3]:  # Limit to 3 sitemaps
-            try:
-                response = await self.http_client.fetch(sitemap_url)
-                if not response:
-                    continue
-                
-                # Quick XML check
-                content = response.strip()
-                if not content.startswith('<?xml') and not content.startswith('<'):
-                    logger.debug(f"Sitemap {sitemap_url} is not XML")
-                    continue
-                
-                root = ET.fromstring(content)
-                
-                # Check if this is a sitemap index (contains other sitemaps)
-                ns = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
-                nested_sitemaps = root.findall('.//sm:sitemap/sm:loc', ns)
-                if not nested_sitemaps:
-                    # Try without namespace
-                    nested_sitemaps = root.findall('.//sitemap/loc')
-                
-                if nested_sitemaps:
-                    # Parse first nested sitemap (usually contains pages)
-                    for nested in nested_sitemaps[:2]:
-                        if nested.text:
-                            nested_urls = await self._parse_single_sitemap(nested.text)
-                            all_urls.extend(nested_urls)
-                            if len(all_urls) >= 300:  # Limit total URLs
-                                break
-                else:
-                    # Direct sitemap with URLs
-                    for elem in root.iter():
-                        if elem.tag.endswith('loc') and elem.text:
-                            all_urls.append(elem.text)
-                
-                if all_urls:
-                    logger.debug(f"Found {len(all_urls)} URLs from sitemap(s)")
-                    break
-                    
-            except ET.ParseError as e:
-                logger.debug(f"XML parse error for {sitemap_url}: {e}")
-            except Exception as e:
-                logger.debug(f"Sitemap {sitemap_url} failed: {e}")
-        
-        return all_urls[:300]  # Return max 300 URLs
-
-    async def _parse_single_sitemap(self, sitemap_url: str) -> list[str]:
-        """Parse URLs from a single sitemap file."""
-        import xml.etree.ElementTree as ET
-        
-        urls = []
-        try:
-            response = await self.http_client.fetch(sitemap_url)
-            if not response:
-                return urls
-            
-            content = response.strip()
-            if not content.startswith('<?xml') and not content.startswith('<'):
-                return urls
-            
-            root = ET.fromstring(content)
-            
-            for elem in root.iter():
-                if elem.tag.endswith('loc') and elem.text:
-                    urls.append(elem.text)
-                    
-        except Exception as e:
-            logger.debug(f"Failed to parse sitemap {sitemap_url}: {e}")
-        
-        return urls

@@ -357,10 +357,10 @@ class TestFindJobSection:
         assert result is None
     
     def test_detects_odoo_site(self):
-        """Should detect Odoo site by generator meta tag."""
+        """Should detect Odoo site by generator meta tag via OdooParser."""
         from bs4 import BeautifulSoup
+        from src.searchers.job_boards.odoo import OdooParser
         
-        provider = MockLLMProvider()
         html = """
         <html>
         <head>
@@ -375,7 +375,8 @@ class TestFindJobSection:
         """
         soup = BeautifulSoup(html, 'lxml')
         
-        assert provider._is_odoo_site(soup)
+        # OdooParser is now the source of truth for Odoo detection
+        assert OdooParser.is_odoo_site(soup)
 
 
 class TestExtractLinksFromHtml:
