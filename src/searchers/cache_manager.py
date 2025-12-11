@@ -5,7 +5,7 @@ Handles SQLite-based caching of discovered career pages and job listings.
 
 import logging
 from typing import Optional, Callable, Awaitable
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from src.models import Job
 from src.database import JobRepository
@@ -18,6 +18,17 @@ from src.searchers.job_filters import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _clean_career_url(url: str) -> str:
+    """Remove query params from career URL before caching.
+    
+    Query params like ?q=Center are filters that may return 0 jobs.
+    We cache only the base URL to avoid stale filtered results.
+    """
+    parsed = urlparse(url)
+    # Keep only scheme, netloc, path (remove query and fragment)
+    return urlunparse(parsed._replace(query='', fragment=''))
 
 
 class CacheManager:
@@ -169,12 +180,17 @@ class CacheManager:
             # Extract company info on first scan (when no description yet)
             await self._maybe_extract_company_info(site, domain)
             
+            # Clean URL (remove query params that may be filters)
+            clean_url = _clean_career_url(careers_url)
+            if clean_url != careers_url:
+                logger.debug(f"Cleaned career URL: {careers_url} -> {clean_url}")
+            
             # Detect platform from URL
-            platform = detect_job_board_platform(careers_url)
+            platform = detect_job_board_platform(clean_url)
             
             # Save career URL
-            await self._repository.add_career_url(site.id, careers_url, platform)
-            logger.debug(f"Cached career URL for {domain}: {careers_url}")
+            await self._repository.add_career_url(site.id, clean_url, platform)
+            logger.debug(f"Cached career URL for {domain}: {clean_url}")
             
             # Sync jobs (this also handles new/removed tracking)
             sync_result = await self._repository.sync_jobs(site.id, jobs)

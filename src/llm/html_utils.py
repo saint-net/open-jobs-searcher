@@ -6,6 +6,7 @@ import re
 from typing import Optional
 
 from bs4 import BeautifulSoup, Comment
+from markdownify import markdownify as md
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,9 @@ KEEP_ATTRS = {'href', 'class', 'id', 'role', 'data-job', 'data-position'}
 
 # Keywords for relevant CSS classes
 RELEVANT_CLASS_KEYWORDS = ['job', 'career', 'position', 'vacancy', 'opening', 'title', 'list', 'item']
+
+# Job content markers for smart removal
+JOB_MARKERS = ['job', 'career', 'position', 'stelle', 'vacancy', 'opening', '(m/w/d)', '(m/f/d)', 'developer', 'engineer', 'manager']
 
 
 def clean_html(html: str) -> str:
@@ -87,6 +91,102 @@ def clean_html(html: str) -> str:
     clean = re.sub(r'>\s+<', '><', clean)
     
     return clean.strip()
+
+
+def html_to_markdown(html: str, preserve_links: bool = True) -> str:
+    """
+    Convert HTML to Markdown for more efficient LLM processing.
+    
+    Markdown is ~3-5x smaller than HTML while preserving structure.
+    This significantly reduces token usage in LLM calls.
+    
+    Args:
+        html: HTML content to convert
+        preserve_links: Keep hyperlinks in markdown format
+        
+    Returns:
+        Markdown string optimized for LLM processing
+    """
+    soup = BeautifulSoup(html, 'lxml')
+    
+    # Remove unwanted tags
+    for tag in soup.find_all(REMOVE_TAGS):
+        tag.decompose()
+    
+    # Remove cookie consent dialogs
+    for selector in COOKIE_SELECTORS:
+        try:
+            for element in soup.select(selector):
+                element.decompose()
+        except Exception:
+            pass
+    
+    # Remove comments
+    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+        comment.extract()
+    
+    # Strip inline styles from all elements
+    for tag in soup.find_all(True):
+        if 'style' in tag.attrs:
+            del tag.attrs['style']
+    
+    # Remove navigation, header, footer using marker density heuristic
+    for tag in soup.find_all(['nav', 'header', 'footer', 'aside']):
+        text = tag.get_text().lower()
+        text_len = len(text)
+        
+        # Count job-related markers
+        markers_found = sum(1 for marker in JOB_MARKERS if marker in text)
+        
+        # Keep if: many markers OR high marker density in small blocks
+        # Remove if: few markers in large blocks (likely navigation/footer)
+        if text_len > 500 and markers_found < 3:
+            tag.decompose()
+        elif text_len > 200 and markers_found < 2:
+            tag.decompose()
+        elif text_len <= 200 and markers_found == 0:
+            tag.decompose()
+    
+    # Convert tables to simple text representation (markdownify struggles with complex tables)
+    for table in soup.find_all('table'):
+        rows = []
+        for tr in table.find_all('tr'):
+            cells = [td.get_text(strip=True) for td in tr.find_all(['td', 'th'])]
+            if any(cells):  # Skip empty rows
+                rows.append(' | '.join(cells))
+        if rows:
+            table.replace_with(soup.new_string('\n'.join(rows) + '\n'))
+        else:
+            table.decompose()
+    
+    # Convert to markdown
+    markdown = md(
+        str(soup),
+        heading_style="ATX",  # Use # for headers
+        bullets="-",  # Use - for lists
+        strip=['img', 'picture', 'figure', 'video', 'audio', 'canvas', 'form', 'input', 'button', 'select', 'textarea'],
+    )
+    
+    # Clean up the markdown
+    # Remove excessive blank lines (more than 2 consecutive)
+    markdown = re.sub(r'\n{3,}', '\n\n', markdown)
+    
+    # Remove lines that are just whitespace
+    lines = [line for line in markdown.split('\n') if line.strip()]
+    markdown = '\n'.join(lines)
+    
+    # Remove excessive whitespace within lines
+    markdown = re.sub(r'[ \t]+', ' ', markdown)
+    
+    # Remove empty links like [](url) or [ ](url)
+    markdown = re.sub(r'\[\s*\]\([^)]+\)', '', markdown)
+    
+    # Strip links if not needed (further reduces size)
+    if not preserve_links:
+        # Convert [text](url) to just text
+        markdown = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', markdown)
+    
+    return markdown.strip()
 
 
 def extract_url(response: str, base_url: str) -> Optional[str]:

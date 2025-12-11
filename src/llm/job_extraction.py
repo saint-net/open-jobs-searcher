@@ -5,7 +5,7 @@ import re
 from typing import Callable, Awaitable, Optional, Any
 
 from bs4 import BeautifulSoup
-from tenacity import retry, stop_after_attempt, retry_if_result
+from tenacity import retry, stop_after_attempt, retry_if_result, before_sleep_log
 
 from src.constants import MAX_LLM_RETRIES, MIN_JOB_SECTION_SIZE, MAX_JOB_SECTION_SIZE
 from src.models import JobDict, JobExtractionResult
@@ -74,20 +74,23 @@ class LLMJobExtractor:
         clean_html_fn: Callable[[str], str],
         extract_json_fn: Callable[[str], list | dict],
         complete_json_fn: Callable[[str], Awaitable[dict | list]] = None,
+        html_to_markdown_fn: Callable[[str], str] = None,
     ):
         """
         Initialize extractor with LLM provider functions.
         
         Args:
             complete_fn: Async function to call LLM (prompt -> response)
-            clean_html_fn: Function to clean HTML
+            clean_html_fn: Function to clean HTML (fallback)
             extract_json_fn: Function to extract JSON from LLM response (fallback)
             complete_json_fn: Async function for structured JSON output (preferred)
+            html_to_markdown_fn: Function to convert HTML to markdown (preferred, ~3-5x smaller)
         """
         self._complete = complete_fn
         self._clean_html = clean_html_fn
         self._extract_json = extract_json_fn
         self._complete_json = complete_json_fn
+        self._html_to_markdown = html_to_markdown_fn
     
     async def extract_jobs(self, html: str, url: str, page: Any = None) -> list[JobDict]:
         """
@@ -152,27 +155,38 @@ class LLMJobExtractor:
         job_section_html = find_job_section(soup)
         
         if job_section_html:
-            clean_html = self._clean_html(job_section_html)
-            logger.debug(f"Found job section, size: {len(clean_html)} chars")
+            source_html = job_section_html
+            logger.debug(f"Found job section, size: {len(source_html)} chars")
         else:
-            body_html = str(body) if body else html
-            clean_html = self._clean_html(body_html)
+            source_html = str(body) if body else html
 
-        # Limit HTML size (80000 chars for large pages)
-        html_truncated = clean_html[:80000] if len(clean_html) > 80000 else clean_html
+        # Convert to markdown if available (3-5x smaller than HTML)
+        if self._html_to_markdown:
+            content = self._html_to_markdown(source_html)
+            content_type = "markdown"
+        else:
+            content = self._clean_html(source_html)
+            content_type = "HTML"
+
+        # Limit content size (80000 chars for large pages)
+        max_size = 80000
+        content_truncated = content[:max_size] if len(content) > max_size else content
         
-        logger.debug(f"LLM extracting jobs from {url}, HTML size: {len(html_truncated)} chars")
+        logger.debug(f"LLM extracting jobs from {url}, {content_type} size: {len(content_truncated)} chars")
 
-        prompt = EXTRACT_JOBS_PROMPT.format(url=url, html=html_truncated)
+        prompt = EXTRACT_JOBS_PROMPT.format(url=url, html=content_truncated)
 
         return await self._call_llm_for_jobs(prompt)
     
     @retry(
         stop=stop_after_attempt(MAX_LLM_RETRIES),
         retry=retry_if_result(_is_empty_result),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
     )
     async def _call_llm_for_jobs(self, prompt: str) -> JobExtractionResult:
         """Call LLM and parse job extraction response. Retries on empty result."""
+        logger.debug("Calling LLM for job extraction...")
+        
         # Use structured output if available (preferred)
         if self._complete_json:
             result = await self._complete_json(prompt)

@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from src.models import JobDict, JobExtractionResult
-from .html_utils import clean_html, extract_url, extract_json
+from .html_utils import clean_html, extract_url, extract_json, html_to_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ class BaseLLMProvider(ABC):
                 clean_html_fn=clean_html,
                 extract_json_fn=extract_json,
                 complete_json_fn=self.complete_json,
+                html_to_markdown_fn=html_to_markdown,
             )
         return self._job_extractor
     
