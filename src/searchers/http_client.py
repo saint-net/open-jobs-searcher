@@ -1,4 +1,4 @@
-"""Async HTTP client with retry and domain availability checks."""
+"""Async HTTP client with retry, connection pooling, and domain availability checks."""
 
 import logging
 import ssl
@@ -12,8 +12,16 @@ from src.browser import DomainUnreachableError
 logger = logging.getLogger(__name__)
 
 
+# Connection pool limits for better performance
+DEFAULT_POOL_LIMITS = httpx.Limits(
+    max_keepalive_connections=20,  # Max persistent connections
+    max_connections=100,  # Max total connections
+    keepalive_expiry=30.0,  # Keep connections alive for 30s
+)
+
+
 class AsyncHttpClient:
-    """Async HTTP client with retry logic and domain availability checks."""
+    """Async HTTP client with retry logic, connection pooling, and domain availability checks."""
 
     # Typical DNS/connection error patterns
     CONNECTION_ERROR_PATTERNS = [
@@ -43,13 +51,15 @@ class AsyncHttpClient:
         self,
         timeout: float = 30.0,
         headers: Optional[dict] = None,
+        pool_limits: Optional[httpx.Limits] = None,
     ):
         """
-        Initialize HTTP client.
+        Initialize HTTP client with connection pooling.
         
         Args:
             timeout: Request timeout in seconds
             headers: Custom HTTP headers
+            pool_limits: Connection pool limits (uses defaults if not provided)
         """
         default_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -61,12 +71,14 @@ class AsyncHttpClient:
         
         self._headers = default_headers
         self._timeout = timeout
+        self._pool_limits = pool_limits or DEFAULT_POOL_LIMITS
         
-        # Main client with SSL verification
+        # Main client with SSL verification and connection pooling
         self.client = httpx.AsyncClient(
             headers=default_headers,
             follow_redirects=True,
             timeout=timeout,
+            limits=self._pool_limits,
         )
         
         # Client without SSL verification (for problematic certificates)
@@ -78,13 +90,14 @@ class AsyncHttpClient:
         return any(pattern in error_str for pattern in self.SSL_ERROR_PATTERNS)
     
     async def _get_insecure_client(self) -> httpx.AsyncClient:
-        """Get or create client without SSL verification."""
+        """Get or create client without SSL verification (shares pool limits)."""
         if self._insecure_client is None:
             self._insecure_client = httpx.AsyncClient(
                 headers=self._headers,
                 follow_redirects=True,
                 timeout=self._timeout,
                 verify=False,
+                limits=self._pool_limits,
             )
         return self._insecure_client
 

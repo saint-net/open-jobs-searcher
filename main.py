@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import signal
+import sys
 import time
 from typing import Optional
 
@@ -14,6 +16,11 @@ from src.searchers import HeadHunterSearcher, WebsiteSearcher, StepStoneSearcher
 from src.llm import get_llm_provider
 from src.output import display_jobs, save_jobs, display_execution_time
 from src.browser import PlaywrightBrowsersNotInstalledError
+
+
+# Global flag for graceful shutdown
+_shutdown_requested = False
+_active_tasks: set[asyncio.Task] = set()
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +35,46 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+
+def _handle_shutdown_signal(signum, frame):
+    """Handle shutdown signals (SIGINT, SIGTERM) for graceful exit."""
+    global _shutdown_requested
+    signal_name = signal.Signals(signum).name
+    
+    if _shutdown_requested:
+        # Second signal - force exit
+        console.print(f"\n[red]⚠ Повторный {signal_name}, принудительный выход...[/red]")
+        sys.exit(1)
+    
+    _shutdown_requested = True
+    console.print(f"\n[yellow]⚠ Получен {signal_name}, завершение работы...[/yellow]")
+    
+    # Cancel all active tasks
+    for task in _active_tasks:
+        if not task.done():
+            task.cancel()
+
+
+def _setup_signal_handlers():
+    """Setup signal handlers for graceful shutdown."""
+    # Works on Unix and Windows
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+
+
+def _run_async(coro):
+    """Run async coroutine with signal handling support."""
+    _setup_signal_handlers()
+    
+    try:
+        return asyncio.run(coro)
+    except asyncio.CancelledError:
+        console.print("[yellow]⚠ Операция отменена[/yellow]")
+        return None
+    except KeyboardInterrupt:
+        console.print("[yellow]⚠ Прервано пользователем[/yellow]")
+        return None
 
 
 @app.command()
@@ -86,8 +133,11 @@ def search(
     console.print(f"[bold blue]📍 Локация:[/bold blue] {location}")
     console.print()
 
-    # Запускаем асинхронный поиск
-    jobs = asyncio.run(_search_jobs(keywords, location, experience, salary, limit))
+    # Запускаем асинхронный поиск с поддержкой graceful shutdown
+    jobs = _run_async(_search_jobs(keywords, location, experience, salary, limit))
+    
+    if jobs is None:
+        return
 
     # Отображаем результаты
     display_jobs(jobs)
@@ -166,7 +216,9 @@ def stepstone(
     console.print(f"[bold blue]🌐 Источник:[/bold blue] StepStone.de")
     console.print()
 
-    jobs = asyncio.run(_search_stepstone(keywords, location, page))
+    jobs = _run_async(_search_stepstone(keywords, location, page))
+    if jobs is None:
+        return
     display_jobs(jobs)
 
     if output:
@@ -233,7 +285,9 @@ def karriere(
     console.print(f"[bold blue]🌐 Источник:[/bold blue] Karriere.at")
     console.print()
 
-    jobs = asyncio.run(_search_karriere(keywords, location, page))
+    jobs = _run_async(_search_karriere(keywords, location, page))
+    if jobs is None:
+        return
     display_jobs(jobs)
 
     if output:
@@ -292,7 +346,7 @@ def history(
     ),
 ):
     """📜 Показать историю изменений вакансий."""
-    asyncio.run(_show_history(domain, limit))
+    _run_async(_show_history(domain, limit))
 
 
 async def _show_history(domain: Optional[str], limit: int) -> None:
@@ -372,7 +426,7 @@ async def _show_history(domain: Optional[str], limit: int) -> None:
 @app.command()
 def sites():
     """📋 Показать кэшированные сайты."""
-    asyncio.run(_show_sites())
+    _run_async(_show_sites())
 
 
 async def _show_sites() -> None:
@@ -533,13 +587,18 @@ def website(
         console.print(f"[bold blue]💾 База:[/bold blue] отключена")
     console.print()
 
-    # Run async search
-    jobs, sync_result = asyncio.run(_search_website(
+    # Run async search with graceful shutdown support
+    result = _run_async(_search_website(
         url, provider, model, browser, 
         use_cache=not nodb, 
         openrouter_provider=openrouter_provider,
         headless=not visible,
     ))
+    
+    if result is None:
+        return
+    
+    jobs, sync_result = result
     
     # Отображаем результаты синхронизации (новые/удалённые)
     if not nodb:
@@ -716,7 +775,10 @@ def find_job_urls(
         console.print(f"[bold blue]🤖 LLM:[/bold blue] {provider} ({display_model})")
     console.print()
 
-    job_urls = asyncio.run(_find_job_urls(url, provider, model, openrouter_provider))
+    job_urls = _run_async(_find_job_urls(url, provider, model, openrouter_provider))
+    
+    if job_urls is None:
+        return
     
     if job_urls:
         console.print(f"[green]✓[/green] Найдено {len(job_urls)} URL'ов вакансий:")
