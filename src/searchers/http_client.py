@@ -1,7 +1,6 @@
 """Async HTTP client with retry, connection pooling, and domain availability checks."""
 
 import logging
-import ssl
 from typing import Optional
 
 import httpx

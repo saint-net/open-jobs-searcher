@@ -6,22 +6,26 @@ import re
 from abc import ABC, abstractmethod
 from typing import Optional
 
+from tenacity import retry, stop_after_attempt, retry_if_result
+
 from src.constants import (
     MAX_LLM_RETRIES,
     MAX_URLS_FOR_LLM,
     MIN_JOB_SECTION_SIZE,
     MAX_JOB_SECTION_SIZE,
-    MIN_VALID_HTML_SIZE,
 )
+from src.models import JobDict, JobExtractionResult
 
 logger = logging.getLogger(__name__)
 
 
+def _is_empty_result(result: JobExtractionResult) -> bool:
+    """Check if extraction result has no jobs (trigger retry)."""
+    return not result.get("jobs")
+
+
 class BaseLLMProvider(ABC):
     """Abstract base class for LLM providers."""
-    
-    # Retry settings for job extraction
-    MAX_EXTRACTION_RETRIES = MAX_LLM_RETRIES
 
     @abstractmethod
     async def complete(self, prompt: str, system: Optional[str] = None) -> str:
@@ -115,7 +119,6 @@ class BaseLLMProvider(ABC):
             URL job board или None если не найден / текущая страница и есть job board
         """
         from .prompts import FIND_JOB_BOARD_PROMPT
-        from urllib.parse import urljoin
         
         # Извлекаем только ссылки из HTML (более эффективно чем передавать весь HTML)
         links = self._extract_links_from_html(html, url)
@@ -344,7 +347,7 @@ class BaseLLMProvider(ABC):
         logger.debug(f"Extracted company info: {description[:100]}...")
         return description
 
-    async def extract_jobs(self, html: str, url: str, page=None) -> list[dict]:
+    async def extract_jobs(self, html: str, url: str, page=None) -> list[JobDict]:
         """
         Extract job listings from HTML page using hybrid approach.
 
@@ -398,13 +401,13 @@ class BaseLLMProvider(ABC):
         
         return result
     
-    async def _llm_extract_jobs(self, html: str, url: str) -> list[dict]:
+    async def _llm_extract_jobs(self, html: str, url: str) -> list[JobDict]:
         """LLM-based job extraction (used as fallback by hybrid extractor)."""
         # Use the new method and return only jobs for backward compatibility
         result = await self._llm_extract_jobs_with_pagination(html, url)
         return result.get("jobs", [])
     
-    async def _llm_extract_jobs_with_pagination(self, html: str, url: str) -> dict:
+    async def _llm_extract_jobs_with_pagination(self, html: str, url: str) -> JobExtractionResult:
         """LLM-based job extraction with pagination support.
         
         Returns:
@@ -437,30 +440,35 @@ class BaseLLMProvider(ABC):
             html=html_truncated,
         )
 
-        # Retry extraction if result is empty (LLM can be inconsistent)
-        for attempt in range(self.MAX_EXTRACTION_RETRIES):
-            response = await self.complete(prompt)
-            result = self._extract_json(response)
-            
-            # Debug: log raw response if no jobs found
-            if not result or (isinstance(result, dict) and not result.get("jobs")) or (isinstance(result, list) and len(result) == 0):
-                logger.debug(f"LLM response (first 500 chars): {response[:500] if response else 'EMPTY'}")
-            
-            # Handle new format: {"jobs": [...], "next_page_url": ...}
-            if isinstance(result, dict) and "jobs" in result:
-                jobs = result.get("jobs", [])
-                next_page_url = result.get("next_page_url")
-                if isinstance(jobs, list) and len(jobs) > 0:
-                    logger.debug(f"LLM extracted {len(jobs)} jobs on attempt {attempt + 1}")
-                    return {"jobs": jobs, "next_page_url": next_page_url}
-            # Handle old format: [...] (for backward compatibility)
-            elif isinstance(result, list) and len(result) > 0:
-                logger.debug(f"LLM extracted {len(result)} jobs on attempt {attempt + 1}")
-                return {"jobs": result, "next_page_url": None}
-            
-            if attempt < self.MAX_EXTRACTION_RETRIES - 1:
-                logger.debug(f"LLM attempt {attempt + 1} returned no jobs, retrying...")
+        # Use tenacity for retries on empty result
+        return await self._call_llm_for_jobs(prompt)
+    
+    @retry(
+        stop=stop_after_attempt(MAX_LLM_RETRIES),
+        retry=retry_if_result(_is_empty_result),
+    )
+    async def _call_llm_for_jobs(self, prompt: str) -> JobExtractionResult:
+        """Call LLM and parse job extraction response. Retries on empty result."""
+        response = await self.complete(prompt)
+        result = self._extract_json(response)
         
+        # Debug: log raw response if no jobs found
+        if not result or (isinstance(result, dict) and not result.get("jobs")) or (isinstance(result, list) and len(result) == 0):
+            logger.debug(f"LLM response (first 500 chars): {response[:500] if response else 'EMPTY'}")
+        
+        # Handle new format: {"jobs": [...], "next_page_url": ...}
+        if isinstance(result, dict) and "jobs" in result:
+            jobs = result.get("jobs", [])
+            next_page_url = result.get("next_page_url")
+            if isinstance(jobs, list) and len(jobs) > 0:
+                logger.debug(f"LLM extracted {len(jobs)} jobs")
+                return {"jobs": jobs, "next_page_url": next_page_url}
+        # Handle old format: [...] (for backward compatibility)
+        elif isinstance(result, list) and len(result) > 0:
+            logger.debug(f"LLM extracted {len(result)} jobs")
+            return {"jobs": result, "next_page_url": None}
+        
+        logger.debug("LLM returned no jobs, will retry...")
         return {"jobs": [], "next_page_url": None}
     
     # Non-job titles to filter out (open applications, general inquiries, etc.)
@@ -475,7 +483,7 @@ class BaseLLMProvider(ABC):
         r'blindbewerbung',  # German: Blind application
     ]
     
-    def _validate_jobs(self, jobs: list) -> list[dict]:
+    def _validate_jobs(self, jobs: list) -> list[JobDict]:
         """Validate and filter job entries."""
         valid_jobs = []
         for job in jobs:

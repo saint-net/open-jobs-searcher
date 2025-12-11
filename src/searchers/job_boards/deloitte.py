@@ -5,7 +5,6 @@ This parser attempts to extract jobs from search results pages.
 Falls back to LLM extraction if direct parsing fails.
 """
 
-import re
 from urllib.parse import urlparse, parse_qs
 
 from bs4 import BeautifulSoup

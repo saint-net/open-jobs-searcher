@@ -1,9 +1,33 @@
 """Модели данных для вакансий."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TypedDict
 
 from pydantic import BaseModel, Field, computed_field
+
+
+class JobDict(TypedDict, total=False):
+    """TypedDict для промежуточного формата данных вакансии.
+    
+    Используется LLM и парсерами до преобразования в Pydantic Job.
+    """
+    title: str
+    company: str
+    location: str
+    url: str
+    department: Optional[str]
+    description: Optional[str]
+    salary_from: Optional[int]
+    salary_to: Optional[int]
+    salary_currency: Optional[str]
+    experience: Optional[str]
+    employment_type: Optional[str]
+
+
+class JobExtractionResult(TypedDict):
+    """Result of job extraction from HTML."""
+    jobs: list[JobDict]
+    next_page_url: Optional[str]
 
 
 class Job(BaseModel):

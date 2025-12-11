@@ -11,7 +11,7 @@ from typing import Optional
 import aiosqlite
 
 from src.database.connection import get_db_path, init_database
-from src.database.models import Site, CareerUrl, CachedJob, JobHistoryEvent, SyncResult
+from src.database.models import Site, CareerUrl, CachedJob, SyncResult
 from src.models import Job
 
 logger = logging.getLogger(__name__)

@@ -3,7 +3,7 @@
 import logging
 import re
 from typing import Optional
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 
 from src.models import Job
 from src.searchers.base import BaseSearcher

@@ -13,7 +13,6 @@ from .candidate import (
     JobCandidate,
     ExtractionSource,
     is_likely_job_title,
-    JOB_TITLE_KEYWORDS,
 )
 
 logger = logging.getLogger(__name__)

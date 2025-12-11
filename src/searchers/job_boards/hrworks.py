@@ -1,7 +1,6 @@
 """HRworks job board parser."""
 
 import logging
-import re
 
 from bs4 import BeautifulSoup
 
