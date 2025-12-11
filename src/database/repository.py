@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -359,7 +360,14 @@ class JobRepository:
         # Track which existing jobs we've seen
         seen_keys = set()
         
+        # Deduplicate current_jobs by key (title, location)
+        unique_jobs = {}
         for job in current_jobs:
+            key = self._job_key(job.title, job.location)
+            if key not in unique_jobs:
+                unique_jobs[key] = job
+        
+        for job in unique_jobs.values():
             key = self._job_key(job.title, job.location)
             seen_keys.add(key)
             
@@ -386,10 +394,14 @@ class JobRepository:
                     logger.debug(f"Reactivated job: {job.title}")
             else:
                 # New job - insert
-                job_id = await self._insert_job(db, site_id, job)
-                await self._add_history_event(db, job_id, "added")
-                result.new_jobs.append(job)
-                logger.debug(f"New job: {job.title}")
+                try:
+                    job_id = await self._insert_job(db, site_id, job)
+                    await self._add_history_event(db, job_id, "added")
+                    result.new_jobs.append(job)
+                    logger.debug(f"New job: {job.title}")
+                except sqlite3.IntegrityError:
+                    # Job already exists (race condition or key mismatch)
+                    logger.debug(f"Job already exists (skipped): {job.title}")
         
         # Mark unseen active jobs as removed
         for key, existing in existing_jobs.items():
