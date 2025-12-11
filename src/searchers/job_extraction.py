@@ -183,11 +183,30 @@ class JobExtractor:
         context_obj = None
         
         try:
-            # Load page - navigate to jobs only for base URL without query params
+            # Load page - navigate to jobs only if NOT already on a jobs page
             has_query = '?' in careers_url
             
+            # Check if URL already points to a jobs listing page
+            # If so, don't navigate further (we're already there!)
+            import re
+            jobs_path_patterns = [
+                r'/jobs/?$', r'/jobs/',
+                r'/careers/?$', r'/careers/',
+                r'/stellenangebote/?$', r'/stellenangebote/',
+                r'/vacancies/?$', r'/vacancies/',
+                r'/offene-stellen/?$', r'/offene-stellen/',
+                r'/karriere/stellen', r'/career/positions',
+            ]
+            already_on_jobs_page = any(
+                re.search(pattern, careers_url, re.IGNORECASE) 
+                for pattern in jobs_path_patterns
+            )
+            
+            # Don't navigate if we're already on jobs page or have query params
+            should_navigate = not has_query and not already_on_jobs_page
+            
             html, final_url, page_obj, context_obj = await self._fetch_with_page(
-                careers_url, not has_query
+                careers_url, should_navigate
             )
             final_url = final_url or careers_url
             

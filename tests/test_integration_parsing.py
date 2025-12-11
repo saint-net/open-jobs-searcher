@@ -1058,5 +1058,71 @@ class Test8comFilteringScenario:
         # But in real flow, this filter is NOT called for same-domain navigation!
 
 
+class TestAbsKarriereParsing:
+    """Test abs-karriere.de - Site with lazy loading jobs.
+    
+    abs-karriere.de/jobs/ is the career portal for ABS-RZ.
+    Uses lazy loading (Intersection Observer) - jobs load on scroll.
+    This was the original bug report that led to fixing _scroll_and_wait_for_content.
+    Source: https://abs-karriere.de/jobs/
+    """
+    
+    def test_fixture_has_all_lazy_loaded_jobs(self):
+        """Fixture should contain all 8 jobs after lazy loading."""
+        html = load_fixture("abs_karriere_jobs.html")
+        
+        # Count article elements
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, 'lxml')
+        articles = soup.find_all('article')
+        
+        # Site has 8 jobs (3 initial + 5 lazy-loaded)
+        assert len(articles) >= 8, f"Expected ≥8 articles, got {len(articles)}"
+    
+    def test_abs_karriere_has_job_titles(self):
+        """Should have expected job titles in HTML."""
+        html = load_fixture("abs_karriere_jobs.html")
+        
+        # Check for known job titles (as of Dec 2025)
+        assert "Softwareentwickler" in html or "Developer" in html
+        assert "Marketing Manager" in html or "Marketing" in html
+    
+    def test_abs_karriere_no_schema_org(self):
+        """abs-karriere.de should not have Schema.org (falls back to LLM)."""
+        html = load_fixture("abs_karriere_jobs.html")
+        strategy = SchemaOrgStrategy()
+        
+        candidates = strategy.extract(html, "https://abs-karriere.de/jobs/")
+        
+        # No Schema.org data
+        assert len(candidates) == 0
+    
+    @pytest.mark.asyncio
+    async def test_llm_extracts_jobs_from_abs_karriere(self):
+        """Should extract jobs via LLM (no Schema.org on this site)."""
+        html = load_fixture("abs_karriere_jobs.html")
+        
+        async def mock_llm(html, url):
+            return [
+                {"title": "Softwareentwickler/Fullstack-Developer (m/w/d)", "location": "München", "url": "/jobs/1"},
+                {"title": "Sales-Manager/SDA/Vertriebsmitarbeiter (m/w/d)", "location": "München", "url": "/jobs/2"},
+                {"title": "Marketing Manager*in – digitales Marketing & Content Creation (m/w/d)", "location": "München", "url": "/jobs/3"},
+                {"title": "Lohn- und Gehaltsbuchhalter (m/w/d)", "location": "Chemnitz", "url": "/jobs/4"},
+                {"title": "Key Account Manager (m/w/d)", "location": "München", "url": "/jobs/5"},
+                {"title": "Frontend-Entwickler (m/w/d)", "location": "Berlin", "url": "/jobs/6"},
+                {"title": "Bilanzbuchhalter/Steuerfachangestellter/Finanzbuchhalter (m/w/d)", "location": "München", "url": "/jobs/7"},
+                {"title": "Auszubildende/-r (m/w/d) zum Kaufmann/-frau für Büromanagement", "location": "München", "url": "/jobs/8"},
+            ]
+        
+        extractor = HybridJobExtractor(llm_extract_fn=mock_llm)
+        jobs = await extractor.extract(html, "https://abs-karriere.de/jobs/")
+        
+        assert len(jobs) == 8
+        
+        titles = {j["title"] for j in jobs}
+        assert any("Softwareentwickler" in t or "Developer" in t for t in titles)
+        assert any("Marketing" in t for t in titles)
+
+
 # Run with: pytest tests/test_integration_parsing.py -v
 

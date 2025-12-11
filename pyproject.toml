@@ -55,6 +55,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "smoke: quick smoke tests for critical functionality",
+    "e2e: end-to-end tests against real websites (slow, requires network)",
 ]
 
 [build-system]
