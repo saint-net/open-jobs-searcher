@@ -1,0 +1,10 @@
+# This file ensures the data directory exists in git
+# The actual database file (jobs.db) is ignored via .gitignore
+
+
+
+
+
+
+
+
