@@ -212,14 +212,14 @@ Job titles (one per line):
 {titles}
 
 RULES:
-1. Return ONLY a JSON array with translated titles in the same order
+1. Return a JSON object with "translations" array containing translated titles in the same order
 2. Keep the translation professional and accurate
 3. If a title is already in English, keep it unchanged
 4. Preserve any gender notations like (m/w/d) or (m/f/d)
 
-OUTPUT FORMAT - Return ONLY a JSON array:
+OUTPUT FORMAT - Return ONLY a JSON object:
 ```json
-["Translated Title 1", "Translated Title 2", ...]
+{{"translations": ["Translated Title 1", "Translated Title 2", ...]}}
 ```
 
 JSON:

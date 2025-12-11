@@ -24,6 +24,7 @@ class BaseLLMProvider(ABC):
                 complete_fn=self.complete,
                 clean_html_fn=clean_html,
                 extract_json_fn=extract_json,
+                complete_json_fn=self.complete_json,
             )
         return self._job_extractor
     
@@ -36,6 +37,7 @@ class BaseLLMProvider(ABC):
                 clean_html_fn=clean_html,
                 extract_url_fn=extract_url,
                 extract_json_fn=extract_json,
+                complete_json_fn=self.complete_json,
             )
         return self._url_discovery
 
@@ -52,6 +54,25 @@ class BaseLLMProvider(ABC):
             Ответ модели
         """
         pass
+
+    async def complete_json(self, prompt: str, system: Optional[str] = None) -> dict | list:
+        """
+        Генерация JSON ответа от LLM с использованием structured output.
+
+        Использует response_format={"type": "json_object"} для гарантированного
+        валидного JSON без необходимости парсить markdown блоки.
+
+        Args:
+            prompt: Пользовательский промпт (должен явно просить JSON)
+            system: Системный промпт (опционально)
+
+        Returns:
+            Распарсенный JSON (dict или list)
+        """
+        # Дефолтная реализация — fallback на complete() + extract_json()
+        # Провайдеры могут переопределить для использования native structured output
+        response = await self.complete(prompt, system)
+        return extract_json(response)
 
     async def find_careers_url(
         self, html: str, base_url: str, sitemap_urls: list[str] = None
@@ -78,17 +99,60 @@ class BaseLLMProvider(ABC):
         if not titles:
             return []
 
+        # Skip translation if titles already look English (ASCII-only or common English words)
+        if self._titles_look_english(titles):
+            logger.debug("Titles already in English, skipping translation")
+            return titles
+
         titles_text = "\n".join(titles)
         prompt = TRANSLATE_JOB_TITLES_PROMPT.format(titles=titles_text)
 
-        response = await self.complete(prompt)
-        translated = extract_json(response)
+        # Use structured output for guaranteed valid JSON
+        translated = await self.complete_json(prompt)
+
+        # Handle both array and object responses
+        # OpenAI's json_object mode returns {"translations": [...]} instead of [...]
+        if isinstance(translated, dict):
+            # Try common keys for array of translations
+            for key in ("translations", "titles", "translated_titles", "result"):
+                if key in translated and isinstance(translated[key], list):
+                    translated = translated[key]
+                    break
+            else:
+                # If dict has no known keys, check if it's a single-key dict with a list
+                values = list(translated.values())
+                if len(values) == 1 and isinstance(values[0], list):
+                    translated = values[0]
 
         if isinstance(translated, list) and len(translated) == len(titles):
             return [str(t) for t in translated]
         
         logger.warning("Translation failed, returning original titles")
+        logger.debug(f"Expected {len(titles)} titles, got: {type(translated).__name__} = {str(translated)[:100]}...")
         return titles
+
+    def _titles_look_english(self, titles: list[str]) -> bool:
+        """Check if titles are likely already in English."""
+        # Common non-English characters in German job titles
+        non_english_chars = set('äöüßÄÖÜ')
+        # Common German/other language job title words
+        non_english_words = {
+            'entwickler', 'ingenieur', 'leiter', 'berater', 'kaufmann', 'kauffrau',
+            'sachbearbeiter', 'mitarbeiter', 'fachkraft', 'meister', 'techniker',
+            'stellvertretender', 'geschäftsführer', 'abteilungsleiter', 'werkstudent',
+            'практикант', 'разработчик', 'инженер', 'менеджер',  # Russian
+        }
+        
+        for title in titles:
+            title_lower = title.lower()
+            # Check for non-English characters
+            if any(c in title for c in non_english_chars):
+                return False
+            # Check for non-English words
+            if any(word in title_lower for word in non_english_words):
+                return False
+        
+        return True
 
     async def extract_company_info(self, html: str, url: str) -> Optional[str]:
         """Extract company description from website HTML."""

@@ -1,5 +1,6 @@
 """OpenRouter LLM провайдер."""
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -178,46 +179,41 @@ class OpenRouterProvider(BaseLLMProvider):
         logger.warning(retry_msg)
         console.print(f"[bold red]⚠️  {retry_msg}[/bold red]")
 
-    @retry(
-        stop=stop_after_attempt(3),  # MAX_RETRIES
-        wait=wait_exponential(multiplier=2, min=2, max=16),
-        retry=retry_if_exception_type(OpenRouterRetryableError),
-        before_sleep=lambda rs: OpenRouterProvider._log_retry(rs.args[0], rs),
-        reraise=True,
-    )
-    async def complete(self, prompt: str, system: Optional[str] = None) -> str:
-        """Generate response via OpenRouter API with automatic retry on transient errors."""
+    def _build_messages(self, prompt: str, system: Optional[str] = None) -> list[dict]:
+        """Build messages array for API request."""
         from .prompts import SYSTEM_PROMPT
-
-        messages = []
         
-        # Добавляем системный промпт
+        messages = []
         system_content = system or SYSTEM_PROMPT
         if system_content:
             messages.append({"role": "system", "content": system_content})
-        
         messages.append({"role": "user", "content": prompt})
+        return messages
 
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": self.config["temperature"],
-            "max_tokens": self.config["max_tokens"],
-        }
-        
-        # Добавляем provider routing если указан
-        provider_config = self._build_provider_config()
-        if provider_config:
-            payload["provider"] = provider_config
-
-        headers = {
+    def _build_headers(self) -> dict:
+        """Build HTTP headers for API request."""
+        return {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/open-jobs-searcher",
             "X-Title": "Open Jobs Searcher",
         }
 
-        start_time = time.perf_counter()
+    async def _make_request(self, payload: dict) -> dict:
+        """
+        Make HTTP request to OpenRouter API.
+        
+        Args:
+            payload: Request payload
+            
+        Returns:
+            Parsed JSON response
+            
+        Raises:
+            OpenRouterRetryableError: On transient errors (will be retried)
+            RuntimeError: On permanent errors
+        """
+        headers = self._build_headers()
         
         try:
             response = await self.client.post(
@@ -228,9 +224,7 @@ class OpenRouterProvider(BaseLLMProvider):
             response.raise_for_status()
             data = response.json()
             
-            elapsed = time.perf_counter() - start_time
-            
-            # Проверяем на ошибки в ответе
+            # Check for errors in response body
             if data.get("error"):
                 error_data = data["error"]
                 error_msg = error_data.get("message", "Unknown error")
@@ -249,30 +243,7 @@ class OpenRouterProvider(BaseLLMProvider):
                     raise OpenRouterRetryableError(full_error)
                 raise RuntimeError(f"OpenRouter API error: {full_error}")
             
-            # Parse usage stats
-            usage = data.get("usage", {})
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            completion_tokens = usage.get("completion_tokens", 0)
-            
-            # OpenRouter returns cost in generation_time or we estimate from tokens
-            # Most free models have $0 cost
-            cost_usd = 0.0
-            
-            # Track usage
-            self.usage_stats.add_call(prompt_tokens, completion_tokens, elapsed, cost_usd)
-            
-            logger.debug(
-                f"LLM call: {prompt_tokens}+{completion_tokens} tokens, "
-                f"{elapsed:.2f}s, model={self.model}"
-            )
-            
-            # Извлекаем ответ
-            choices = data.get("choices", [])
-            if choices:
-                message = choices[0].get("message", {})
-                return message.get("content", "")
-            
-            return ""
+            return data
             
         except httpx.HTTPStatusError as e:
             error_body = e.response.text[:500]
@@ -288,7 +259,119 @@ class OpenRouterProvider(BaseLLMProvider):
             
         except httpx.ReadTimeout as e:
             raise OpenRouterRetryableError(f"Timeout: {e}") from e
+
+    def _track_usage(self, data: dict, elapsed: float, json_mode: bool = False) -> None:
+        """Track usage statistics from API response."""
+        usage = data.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
         
+        self.usage_stats.add_call(prompt_tokens, completion_tokens, elapsed, 0.0)
+        
+        mode = "JSON" if json_mode else "text"
+        logger.debug(
+            f"LLM {mode} call: {prompt_tokens}+{completion_tokens} tokens, "
+            f"{elapsed:.2f}s, model={self.model}"
+        )
+
+    def _extract_content(self, data: dict) -> str:
+        """Extract text content from API response."""
+        choices = data.get("choices", [])
+        if choices:
+            message = choices[0].get("message", {})
+            return message.get("content", "")
+        return ""
+
+    @retry(
+        stop=stop_after_attempt(3),  # MAX_RETRIES
+        wait=wait_exponential(multiplier=2, min=2, max=16),
+        retry=retry_if_exception_type(OpenRouterRetryableError),
+        before_sleep=lambda rs: OpenRouterProvider._log_retry(rs.args[0], rs),
+        reraise=True,
+    )
+    async def complete(self, prompt: str, system: Optional[str] = None) -> str:
+        """Generate response via OpenRouter API with automatic retry on transient errors."""
+        messages = self._build_messages(prompt, system)
+        
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.config["temperature"],
+            "max_tokens": self.config["max_tokens"],
+        }
+        
+        provider_config = self._build_provider_config()
+        if provider_config:
+            payload["provider"] = provider_config
+
+        start_time = time.perf_counter()
+        
+        try:
+            data = await self._make_request(payload)
+            elapsed = time.perf_counter() - start_time
+            
+            self._track_usage(data, elapsed)
+            return self._extract_content(data)
+            
+        except OpenRouterRetryableError:
+            raise  # Let tenacity handle it
+
+    @retry(
+        stop=stop_after_attempt(3),  # MAX_RETRIES
+        wait=wait_exponential(multiplier=2, min=2, max=16),
+        retry=retry_if_exception_type(OpenRouterRetryableError),
+        before_sleep=lambda rs: OpenRouterProvider._log_retry(rs.args[0], rs),
+        reraise=True,
+    )
+    async def complete_json(self, prompt: str, system: Optional[str] = None) -> dict | list:
+        """
+        Generate JSON response via OpenRouter API with structured output.
+        
+        Uses response_format={"type": "json_object"} for guaranteed valid JSON.
+        Includes automatic retry on transient errors.
+        
+        Args:
+            prompt: User prompt (should explicitly request JSON)
+            system: System prompt (optional)
+            
+        Returns:
+            Parsed JSON (dict or list)
+        """
+        messages = self._build_messages(prompt, system)
+        
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.config["temperature"],
+            "max_tokens": self.config["max_tokens"],
+            "response_format": {"type": "json_object"},
+        }
+        
+        provider_config = self._build_provider_config()
+        if provider_config:
+            payload["provider"] = provider_config
+
+        start_time = time.perf_counter()
+        
+        try:
+            data = await self._make_request(payload)
+            elapsed = time.perf_counter() - start_time
+            
+            self._track_usage(data, elapsed, json_mode=True)
+            
+            content = self._extract_content(data)
+            if content:
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"JSON parse failed despite response_format: {e}")
+                    logger.debug(f"Raw content (first 500 chars): {content[:500]}")
+                    # Fallback to extract_json for malformed responses
+                    from .html_utils import extract_json
+                    return extract_json(content)
+            
+            return {}
+            
         except OpenRouterRetryableError:
             raise  # Let tenacity handle it
 

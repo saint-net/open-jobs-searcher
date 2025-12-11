@@ -564,8 +564,13 @@ class JobRepository:
         - "Erftstadt, Deutschland" vs "Erftstadt"
         - "Berlin, Germany" vs "Berlin"
         - "Remote, Deutschland" vs "Remote"
+        - "Unknown" / None → "" (empty string)
         """
         result = location.lower().strip()
+        
+        # Treat "unknown" as empty (equivalent to None)
+        if result in ("unknown", "n/a", "na", "none", "-", ""):
+            return ""
         
         # Remove country suffixes (with comma or space)
         countries_to_remove = [

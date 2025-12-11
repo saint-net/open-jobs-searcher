@@ -73,6 +73,7 @@ class LLMJobExtractor:
         complete_fn: Callable[[str], Awaitable[str]],
         clean_html_fn: Callable[[str], str],
         extract_json_fn: Callable[[str], list | dict],
+        complete_json_fn: Callable[[str], Awaitable[dict | list]] = None,
     ):
         """
         Initialize extractor with LLM provider functions.
@@ -80,11 +81,13 @@ class LLMJobExtractor:
         Args:
             complete_fn: Async function to call LLM (prompt -> response)
             clean_html_fn: Function to clean HTML
-            extract_json_fn: Function to extract JSON from LLM response
+            extract_json_fn: Function to extract JSON from LLM response (fallback)
+            complete_json_fn: Async function for structured JSON output (preferred)
         """
         self._complete = complete_fn
         self._clean_html = clean_html_fn
         self._extract_json = extract_json_fn
+        self._complete_json = complete_json_fn
     
     async def extract_jobs(self, html: str, url: str, page: Any = None) -> list[JobDict]:
         """
@@ -170,12 +173,21 @@ class LLMJobExtractor:
     )
     async def _call_llm_for_jobs(self, prompt: str) -> JobExtractionResult:
         """Call LLM and parse job extraction response. Retries on empty result."""
-        response = await self._complete(prompt)
-        result = self._extract_json(response)
-        
-        # Debug: log raw response if no jobs found
-        if not result or (isinstance(result, dict) and not result.get("jobs")) or (isinstance(result, list) and len(result) == 0):
-            logger.debug(f"LLM response (first 500 chars): {response[:500] if response else 'EMPTY'}")
+        # Use structured output if available (preferred)
+        if self._complete_json:
+            result = await self._complete_json(prompt)
+            
+            # Debug: log if result is empty
+            if not result or (isinstance(result, dict) and not result.get("jobs")):
+                logger.debug("LLM JSON response returned no jobs")
+        else:
+            # Fallback: complete() + extract_json()
+            response = await self._complete(prompt)
+            result = self._extract_json(response)
+            
+            # Debug: log raw response if no jobs found
+            if not result or (isinstance(result, dict) and not result.get("jobs")) or (isinstance(result, list) and len(result) == 0):
+                logger.debug(f"LLM response (first 500 chars): {response[:500] if response else 'EMPTY'}")
         
         # Handle new format: {"jobs": [...], "next_page_url": ...}
         if isinstance(result, dict) and "jobs" in result:

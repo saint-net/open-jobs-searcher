@@ -23,6 +23,7 @@ class LLMUrlDiscovery:
         clean_html_fn: Callable[[str], str],
         extract_url_fn: Callable[[str, str], Optional[str]],
         extract_json_fn: Callable[[str], list | dict],
+        complete_json_fn: Callable[[str], Awaitable[dict | list]] = None,
     ):
         """
         Initialize URL discovery with LLM provider functions.
@@ -31,12 +32,14 @@ class LLMUrlDiscovery:
             complete_fn: Async function to call LLM (prompt -> response)
             clean_html_fn: Function to clean HTML
             extract_url_fn: Function to extract URL from LLM response
-            extract_json_fn: Function to extract JSON from LLM response
+            extract_json_fn: Function to extract JSON from LLM response (fallback)
+            complete_json_fn: Async function for structured JSON output (preferred)
         """
         self._complete = complete_fn
         self._clean_html = clean_html_fn
         self._extract_url = extract_url_fn
         self._extract_json = extract_json_fn
+        self._complete_json = complete_json_fn
 
     async def find_careers_url(
         self, html: str, base_url: str, sitemap_urls: list[str] = None
@@ -194,8 +197,12 @@ class LLMUrlDiscovery:
             html=html_truncated,
         )
 
-        response = await self._complete(prompt)
-        result = self._extract_json(response)
+        # Use structured output if available
+        if self._complete_json:
+            result = await self._complete_json(prompt)
+        else:
+            response = await self._complete(prompt)
+            result = self._extract_json(response)
         
         if not isinstance(result, list):
             logger.warning(f"LLM returned non-list for job URLs: {type(result)}")
