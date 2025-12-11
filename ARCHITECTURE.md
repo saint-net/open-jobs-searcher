@@ -44,6 +44,8 @@ Open Jobs Searcher - это инструмент для поиска вакан�
 #### Поддерживаемые платформы
 - Personio, Greenhouse, Lever - HTML парсинг
 - Workable, Deloitte - HTML парсинг
+- HRworks - HTML парсинг
+- Odoo - CMS парсинг
 - Recruitee - API-based парсинг
 - SmartRecruiters, Ashby, Breezy HR - HTML парсинг
 - BambooHR, Factorial - HTML парсинг
@@ -291,23 +293,25 @@ CLI (history) → JobRepository → job_history table → Output
 
 | Тип | Файлы | Описание |
 |-----|-------|----------|
-| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (95 тестов) |
-| Integration | `test_integration_*.py` | Парсинг с сохранённым HTML (16 тестов) |
-| Job Boards | `test_job_board_parsers.py` | Парсеры платформ (34 теста) |
+| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (103 теста) |
+| Integration | `test_integration_*.py` | Парсинг с сохранённым HTML (78 тестов) |
+| Job Boards | `test_job_board_parsers.py` | Парсеры платформ (77 тестов) |
+| Filters | `test_website_filters.py` | Фильтрация вакансий (21 тест) |
 
 ### Структура
 
 ```
 tests/
-├── fixtures/                      # Тестовые HTML (7 платформ)
+├── fixtures/                      # Тестовые HTML (19 файлов)
 ├── test_smoke_*.py                # Smoke тесты модулей
 ├── test_integration_parsing.py    # E2E парсинг
-└── test_job_board_parsers.py      # Lever, Personio, Recruitee, Workable, Greenhouse, Odoo
+├── test_job_board_parsers.py      # Lever, Personio, Recruitee, Workable, Greenhouse, Odoo, HRworks
+└── test_website_filters.py        # Фильтрация и нормализация
 ```
 
 ### Запуск
 
 ```bash
-python -m pytest tests/ -q                        # Все тесты (145 штук, ~1 сек)
+python -m pytest tests/ -q                        # Все тесты (~290 штук, ~1 сек)
 python -m pytest tests/test_job_board_parsers.py  # После изменений в job_boards/
 ```

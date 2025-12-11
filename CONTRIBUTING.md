@@ -29,7 +29,7 @@ ruff check .
 
 ### Запуск тестов
 ```bash
-# Все тесты (145 штук, ~1 сек)
+# Все тесты (~290 штук, ~1 сек)
 python -m pytest tests/ -v
 
 # Быстрая проверка
@@ -185,20 +185,37 @@ llm = get_llm_provider("openrouter", model="openai/gpt-oss-120b", provider="chut
 ```
 tests/
 ├── conftest.py                    # Общие фикстуры
-├── fixtures/                      # Тестовые HTML файлы (7 платформ)
-│   ├── schema_org_jobs.html       # Schema.org JSON-LD
-│   ├── greenhouse_style.html      # Greenhouse-style layout
+├── fixtures/                      # Тестовые HTML файлы (19 файлов)
+│   │
+│   │  # Job Board платформы
+│   ├── greenhouse_style.html      # Greenhouse job board
+│   ├── hrworks_jobs.html          # HRworks job board
 │   ├── lever_jobs.html            # Lever job board
+│   ├── odoo_jobs.html             # Odoo CMS
 │   ├── personio_jobs.html         # Personio job board
 │   ├── recruitee_jobs.html        # Recruitee (embedded JSON)
+│   ├── talention_jobs.html        # Talention job board
 │   ├── workable_jobs.html         # Workable (JSON-LD)
-│   └── odoo_jobs.html             # Odoo CMS page
-├── test_smoke_llm_base.py         # Smoke: LLM base методы
-├── test_smoke_prompts.py          # Smoke: промпты
-├── test_smoke_browser.py          # Smoke: BrowserLoader
-├── test_smoke_extraction.py       # Smoke: экстракция
-├── test_integration_parsing.py    # Integration: парсинг с реальным HTML
-└── test_job_board_parsers.py      # Job Board парсеры (34 теста)
+│   │
+│   │  # Custom sites (LLM extraction)
+│   ├── schema_org_jobs.html       # Schema.org JSON-LD
+│   ├── ui_city_jobs.html          # ui.city - Smart City
+│   ├── 1nce_jobs.html             # 1nce.com - IoT
+│   ├── 3p_services_jobs.html      # 3p-services.com - Pipeline
+│   ├── 3ss_careers.html           # 3ss.tv - Streaming
+│   ├── 4dd_werbeagentur_jobs.html # 4dd.de - Advertising
+│   ├── 4pipes_jobs.html           # 4pipes
+│   ├── 4zero_jobs.html            # 4zero
+│   ├── 711media_jobs.html         # 711media.de - Digital
+│   ├── 8com_jobs.html             # 8com.de - Security
+│   └── pdf_links_jobs.html        # PDF links filtering
+├── test_smoke_llm_base.py         # Smoke: LLM base методы (35 тестов)
+├── test_smoke_prompts.py          # Smoke: промпты (24 теста)
+├── test_smoke_browser.py          # Smoke: BrowserLoader (19 тестов)
+├── test_smoke_extraction.py       # Smoke: экстракция (25 тестов)
+├── test_integration_parsing.py    # Integration: парсинг с реальным HTML (78 тестов)
+├── test_job_board_parsers.py      # Job Board парсеры (77 тестов)
+└── test_website_filters.py        # Фильтрация вакансий (21 тест)
 ```
 
 ### Когда запускать тесты
@@ -210,6 +227,7 @@ tests/
 | `src/browser/loader.py` | `pytest tests/test_smoke_browser.py -v` |
 | `src/extraction/*.py` | `pytest tests/test_smoke_extraction.py tests/test_integration_parsing.py -v` |
 | `src/searchers/job_boards/*.py` | `pytest tests/test_job_board_parsers.py -v` |
+| `src/searchers/website.py` | `pytest tests/test_website_filters.py -v` |
 
 ### Добавление тестового сайта
 

@@ -6,14 +6,15 @@
 
 | Тип | Файл | Описание |
 |-----|------|----------|
-| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (95 тестов) |
-| Integration | `test_integration_*.py` | Проверка парсинга с реальным HTML (28 тестов) |
-| Job Boards | `test_job_board_parsers.py` | Тесты парсеров платформ (39 тестов) |
+| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (103 теста) |
+| Integration | `test_integration_*.py` | Проверка парсинга с реальным HTML (78 тестов) |
+| Job Boards | `test_job_board_parsers.py` | Тесты парсеров платформ (77 тестов) |
+| Filters | `test_website_filters.py` | Фильтрация вакансий (21 тест) |
 
 ## Запуск тестов
 
 ```bash
-# ВСЕ тесты (162 штуки, ~1 сек)
+# ВСЕ тесты (~290 штук, ~1 сек)
 python -m pytest tests/ -v
 
 # Только smoke тесты (быстро)
@@ -43,6 +44,7 @@ python -m pytest tests/ -q
 | `src/browser/loader.py` | `test_smoke_browser.py` |
 | `src/extraction/*.py` | `test_smoke_extraction.py`, `test_integration_parsing.py` |
 | `src/searchers/job_boards/*.py` | `test_job_board_parsers.py` |
+| `src/searchers/website.py` | `test_website_filters.py` |
 
 ### Рекомендуется перед коммитом
 
@@ -56,27 +58,37 @@ python -m pytest tests/ -q --tb=short
 tests/
 ├── __init__.py
 ├── conftest.py                    # Общие фикстуры
-├── fixtures/                      # Тестовые HTML файлы
+├── fixtures/                      # Тестовые HTML файлы (19 файлов)
 │   │
 │   │  # Job Board платформы (специализированные парсеры)
 │   ├── greenhouse_style.html      # Greenhouse job board
+│   ├── hrworks_jobs.html          # HRworks job board
 │   ├── lever_jobs.html            # Lever job board
+│   ├── odoo_jobs.html             # Odoo CMS
 │   ├── personio_jobs.html         # Personio job board
 │   ├── recruitee_jobs.html        # Recruitee (embedded JSON)
+│   ├── talention_jobs.html        # Talention job board
 │   ├── workable_jobs.html         # Workable (JSON-LD)
-│   ├── odoo_jobs.html             # Odoo CMS
 │   │
 │   │  # Custom sites (LLM extraction)
 │   ├── schema_org_jobs.html       # Schema.org JSON-LD (custom site)
 │   ├── ui_city_jobs.html          # ui.city - Custom site (Smart City)
 │   ├── 1nce_jobs.html             # 1nce.com - Custom site (IoT)
-│   └── 3p_services_jobs.html      # 3p-services.com - Custom site (Pipeline)
-├── test_smoke_llm_base.py         # LLM: clean_html, extract_json
-├── test_smoke_prompts.py          # Промпты: форматирование
-├── test_smoke_browser.py          # Браузер: BrowserLoader
-├── test_smoke_extraction.py       # Экстракция: Schema.org
-├── test_integration_parsing.py    # Парсинг с реальным HTML
-└── test_job_board_parsers.py      # Job Board парсеры (Lever, Personio, etc.)
+│   ├── 3p_services_jobs.html      # 3p-services.com - Custom site (Pipeline)
+│   ├── 3ss_careers.html           # 3ss.tv - Streaming
+│   ├── 4dd_werbeagentur_jobs.html # 4dd.de - Advertising
+│   ├── 4pipes_jobs.html           # 4pipes
+│   ├── 4zero_jobs.html            # 4zero
+│   ├── 711media_jobs.html         # 711media.de - Digital
+│   ├── 8com_jobs.html             # 8com.de - Security
+│   └── pdf_links_jobs.html        # PDF links filtering
+├── test_smoke_llm_base.py         # LLM: clean_html, extract_json (35 тестов)
+├── test_smoke_prompts.py          # Промпты: форматирование (24 теста)
+├── test_smoke_browser.py          # Браузер: BrowserLoader (19 тестов)
+├── test_smoke_extraction.py       # Экстракция: Schema.org (25 тестов)
+├── test_integration_parsing.py    # Парсинг с реальным HTML (78 тестов)
+├── test_job_board_parsers.py      # Job Board парсеры (77 тестов)
+└── test_website_filters.py        # Фильтрация вакансий (21 тест)
 ```
 
 ## Покрытие тестами
@@ -114,6 +126,7 @@ tests/
 - Определение Odoo сайтов
 - Очистка HTML перед отправкой в LLM
 - Валидация и фильтрация результатов
+- Тесты парсинга реальных сайтов (ui.city, 1nce, 3p-services, 3ss, 4dd, 4zero, 711media, 8com)
 
 ### `test_job_board_parsers.py` (Job Board парсеры)
 - **LeverParser** - `.posting`, `.posting-title` классы
@@ -122,6 +135,13 @@ tests/
 - **WorkableParser** - JSON-LD, `/j/` ссылки
 - **GreenhouseParser** - `.opening`, `/jobs/` ссылки
 - **OdooParser** - `.o_job`, `/jobs/detail/` ссылки
+- **HRworksParser** - HRworks job board
+- **TalentionDetection** - Talention platform detection
+
+### `test_website_filters.py` (Фильтрация)
+- Нормализация доменов
+- Фильтрация вакансий по поисковому запросу
+- Определение редиректов доменов
 
 ## Добавление новых тестов
 
@@ -146,4 +166,3 @@ class TestNewFeature:
 
 - `pytest>=8.0.0`
 - `pytest-asyncio>=0.23.0`
-
