@@ -195,16 +195,17 @@ class TestExtractUrl:
 
 
 class TestValidateJobs:
-    """Tests for _validate_jobs method."""
+    """Tests for validate_jobs function."""
     
     def test_validates_correct_jobs(self):
         """Should accept valid job entries."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import validate_jobs
+        
         jobs = [
             {"title": "Developer (m/w/d)", "location": "Berlin", "url": "https://x.com/1"},
             {"title": "Manager", "location": "Munich", "url": "https://x.com/2"},
         ]
-        result = provider._validate_jobs(jobs)
+        result = validate_jobs(jobs)
         
         assert len(result) == 2
         assert result[0]["title"] == "Developer (m/w/d)"
@@ -212,96 +213,99 @@ class TestValidateJobs:
     
     def test_filters_jobs_without_title(self):
         """Should filter out jobs without title."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import validate_jobs
+        
         jobs = [
             {"title": "", "location": "Berlin"},
             {"location": "Munich"},  # No title key
             {"title": "Valid Job", "location": "Hamburg"},
         ]
-        result = provider._validate_jobs(jobs)
+        result = validate_jobs(jobs)
         
         assert len(result) == 1
         assert result[0]["title"] == "Valid Job"
     
     def test_filters_non_dict_entries(self):
         """Should filter out non-dictionary entries."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import validate_jobs
+        
         jobs = [
             "not a dict",
             123,
             {"title": "Valid Job"},
             None,
         ]
-        result = provider._validate_jobs(jobs)
+        result = validate_jobs(jobs)
         
         assert len(result) == 1
     
     def test_sets_unknown_for_missing_location(self):
         """Should set 'Unknown' for missing location."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import validate_jobs
+        
         jobs = [{"title": "Developer"}]
-        result = provider._validate_jobs(jobs)
+        result = validate_jobs(jobs)
         
         assert result[0]["location"] == "Unknown"
     
     def test_filters_initiativbewerbung(self):
         """Should filter 'Initiativbewerbung' entries."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import validate_jobs
+        
         jobs = [
             {"title": "Initiativbewerbung (m/w/d)"},
             {"title": "Developer (m/w/d)"},
         ]
-        result = provider._validate_jobs(jobs)
+        result = validate_jobs(jobs)
         
         assert len(result) == 1
         assert "Initiativbewerbung" not in result[0]["title"]
 
 
 class TestIsNonJobEntry:
-    """Tests for _is_non_job_entry method."""
+    """Tests for is_non_job_entry function."""
     
     def test_detects_initiativbewerbung(self):
         """Should detect 'Initiativbewerbung' as non-job."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import is_non_job_entry
         
-        assert provider._is_non_job_entry("Initiativbewerbung (m/w/d)")
-        assert provider._is_non_job_entry("initiativbewerbung")
-        assert provider._is_non_job_entry("Initiativ Bewerbung")
+        assert is_non_job_entry("Initiativbewerbung (m/w/d)")
+        assert is_non_job_entry("initiativbewerbung")
+        assert is_non_job_entry("Initiativ Bewerbung")
     
     def test_detects_spontanbewerbung(self):
         """Should detect 'Spontanbewerbung' as non-job."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import is_non_job_entry
         
-        assert provider._is_non_job_entry("Spontanbewerbung")
+        assert is_non_job_entry("Spontanbewerbung")
     
     def test_detects_open_application(self):
         """Should detect 'Open Application' variants."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import is_non_job_entry
         
-        assert provider._is_non_job_entry("Open Application")
-        assert provider._is_non_job_entry("Unsolicited Application")
-        assert provider._is_non_job_entry("Speculative Application")
-        assert provider._is_non_job_entry("General Application")
+        assert is_non_job_entry("Open Application")
+        assert is_non_job_entry("Unsolicited Application")
+        assert is_non_job_entry("Speculative Application")
+        assert is_non_job_entry("General Application")
     
     def test_accepts_real_jobs(self):
         """Should accept real job titles."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import is_non_job_entry
         
-        assert not provider._is_non_job_entry("Senior Developer (m/w/d)")
-        assert not provider._is_non_job_entry("Product Manager")
-        assert not provider._is_non_job_entry("Software Engineer - Berlin")
+        assert not is_non_job_entry("Senior Developer (m/w/d)")
+        assert not is_non_job_entry("Product Manager")
+        assert not is_non_job_entry("Software Engineer - Berlin")
 
 
 class TestFindJobSection:
-    """Tests for _find_job_section method."""
+    """Tests for find_job_section function."""
     
     def test_finds_job_list_section(self):
         """Should find section with job-related content when large enough."""
         from bs4 import BeautifulSoup
+        from src.llm.job_extraction import find_job_section
         
-        provider = MockLLMProvider()
         # HTML must be large enough (>1000 chars for combined elements)
-        # to pass the size filter in _find_job_section
         html = """
         <html>
         <body>
@@ -337,9 +341,9 @@ class TestFindJobSection:
         </html>
         """
         soup = BeautifulSoup(html, 'lxml')
-        result = provider._find_job_section(soup)
+        result = find_job_section(soup)
         
-        # The method may return None for pages that don't meet size thresholds
+        # The function may return None for pages that don't meet size thresholds
         # or don't match specific patterns. This is acceptable behavior.
         if result is not None:
             assert "(m/w/d)" in result
@@ -347,11 +351,11 @@ class TestFindJobSection:
     def test_returns_none_for_small_content(self):
         """Should return None for HTML with small job sections."""
         from bs4 import BeautifulSoup
+        from src.llm.job_extraction import find_job_section
         
-        provider = MockLLMProvider()
         html = "<html><body><div>Job (m/w/d)</div></body></html>"
         soup = BeautifulSoup(html, 'lxml')
-        result = provider._find_job_section(soup)
+        result = find_job_section(soup)
         
         # Small sections should return None (filtered by size check)
         assert result is None
@@ -380,11 +384,12 @@ class TestFindJobSection:
 
 
 class TestExtractLinksFromHtml:
-    """Tests for _extract_links_from_html method."""
+    """Tests for extract_links_from_html function."""
     
     def test_extracts_links_with_text(self):
         """Should extract links with their text."""
-        provider = MockLLMProvider()
+        from src.llm.url_discovery import extract_links_from_html
+        
         html = """
         <html>
         <body>
@@ -393,7 +398,7 @@ class TestExtractLinksFromHtml:
         </body>
         </html>
         """
-        result = provider._extract_links_from_html(html, "https://example.com")
+        result = extract_links_from_html(html, "https://example.com")
         
         assert len(result) >= 2
         assert any("All Jobs" in link for link in result)
@@ -401,33 +406,36 @@ class TestExtractLinksFromHtml:
     
     def test_converts_relative_urls(self):
         """Should convert relative URLs to absolute."""
-        provider = MockLLMProvider()
+        from src.llm.url_discovery import extract_links_from_html
+        
         html = '<a href="/careers">Careers</a>'
-        result = provider._extract_links_from_html(html, "https://example.com")
+        result = extract_links_from_html(html, "https://example.com")
         
         assert "https://example.com/careers" in result[0]
     
     def test_skips_javascript_and_anchor_links(self):
         """Should skip javascript: and # links."""
-        provider = MockLLMProvider()
+        from src.llm.url_discovery import extract_links_from_html
+        
         html = """
         <a href="#">Skip</a>
         <a href="javascript:void(0)">Click</a>
         <a href="/valid">Valid</a>
         """
-        result = provider._extract_links_from_html(html, "https://example.com")
+        result = extract_links_from_html(html, "https://example.com")
         
         assert len(result) == 1
         assert "valid" in result[0].lower()
     
     def test_deduplicates_links(self):
         """Should remove duplicate links."""
-        provider = MockLLMProvider()
+        from src.llm.url_discovery import extract_links_from_html
+        
         html = """
         <a href="/jobs">Jobs</a>
         <a href="/jobs">Jobs Again</a>
         """
-        result = provider._extract_links_from_html(html, "https://example.com")
+        result = extract_links_from_html(html, "https://example.com")
         
         # Should only have one entry for /jobs
         urls = [link.split()[0] for link in result]

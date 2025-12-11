@@ -233,12 +233,12 @@ class TestOdooSiteDetection:
     def test_finds_odoo_job_section(self):
         """Should find Odoo job section by specific selectors."""
         from bs4 import BeautifulSoup
+        from src.llm.job_extraction import find_job_section
         
         html = load_fixture("odoo_jobs.html")
-        provider = MockLLMProvider()
         soup = BeautifulSoup(html, 'lxml')
         
-        section = provider._find_job_section(soup)
+        section = find_job_section(soup)
         
         assert section is not None
         assert "Softwareentwickler" in section
@@ -250,7 +250,7 @@ class TestValidateJobsIntegration:
     
     def test_filters_initiativbewerbung_from_real_results(self):
         """Should filter open application entries."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import validate_jobs
         
         jobs = [
             {"title": "Senior Developer (m/w/d)", "location": "Berlin", "url": "/job/1"},
@@ -259,7 +259,7 @@ class TestValidateJobsIntegration:
             {"title": "Open Application", "location": "Remote", "url": "/open"},
         ]
         
-        valid = provider._validate_jobs(jobs)
+        valid = validate_jobs(jobs)
         
         assert len(valid) == 2
         titles = {j["title"] for j in valid}
@@ -270,7 +270,7 @@ class TestValidateJobsIntegration:
     
     def test_handles_missing_fields_gracefully(self):
         """Should handle jobs with missing optional fields."""
-        provider = MockLLMProvider()
+        from src.llm.job_extraction import validate_jobs
         
         jobs = [
             {"title": "Developer"},  # Minimal
@@ -278,7 +278,7 @@ class TestValidateJobsIntegration:
             {"title": "Engineer", "location": "Berlin", "department": "IT"},  # Full
         ]
         
-        valid = provider._validate_jobs(jobs)
+        valid = validate_jobs(jobs)
         
         assert len(valid) == 3
         assert valid[0]["location"] == "Unknown"
