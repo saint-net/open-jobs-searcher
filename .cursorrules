@@ -12,13 +12,20 @@
 
 ### Структура модулей
 - `src/searchers/` - поисковики вакансий (HeadHunter, StepStone, Karriere, Website)
+  - `cache_manager.py` - CacheManager для кэширования career URL и вакансий
+  - `job_extraction.py` - JobExtractor для извлечения с пагинацией
+  - `job_filters.py` - фильтры и нормализация (normalize_title, normalize_location)
 - `src/searchers/job_boards/` - парсеры для популярных job board платформ
-- `src/llm/` - провайдеры LLM (Ollama, OpenRouter) с единым интерфейсом BaseLLMProvider
+- `src/llm/` - провайдеры LLM с единым интерфейсом BaseLLMProvider
+  - `html_utils.py` - утилиты для HTML/JSON (clean_html, extract_json)
+  - `job_extraction.py` - LLMJobExtractor
+  - `url_discovery.py` - LLMUrlDiscovery
 - `src/browser/` - модули для работы с Playwright (загрузка SPA, навигация, cookies)
 - `src/database/` - SQLite кэширование и отслеживание изменений вакансий
 - `src/extraction/` - гибридная экстракция вакансий (Schema.org + LLM)
 - `src/config.py` - настройки через Pydantic Settings
-- `src/models.py` - модели данных (Pydantic)
+- `src/constants.py` - глобальные константы (таймауты, лимиты)
+- `src/models.py` - модели данных (Pydantic, TypedDict)
 - `src/output.py` - форматирование и вывод результатов
 
 ### Паттерны проектирования
@@ -46,6 +53,8 @@
 - Структурированный вывод через JSON schema
 - Обработка rate limits и retry логика в провайдерах
 - Дефолтная модель: openai/gpt-oss-120b (OpenRouter)
+- Composition pattern: LLMJobExtractor, LLMUrlDiscovery
+- Утилиты в `html_utils.py`: clean_html, extract_json, extract_url
 
 ### Гибридная экстракция
 - `HybridJobExtractor` использует Schema.org + LLM
@@ -99,7 +108,7 @@
 
 ### Новый LLM провайдер
 1. Наследуйте BaseLLMProvider
-2. Реализуйте `complete()` и методы экстракции
+2. Реализуйте только `complete()` - остальное через Composition
 3. Добавьте в `get_llm_provider()` factory
 4. Обновите документацию
 

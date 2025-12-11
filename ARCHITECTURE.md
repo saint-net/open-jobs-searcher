@@ -95,20 +95,44 @@ job_history (id, job_id, event, changed_at, details)
 
 ### 6. LLM провайдеры (`src/llm/`)
 
-#### BaseLLMProvider
+#### BaseLLMProvider (`base.py`)
 Абстрактный класс для всех LLM провайдеров:
-- `complete()` - генерация ответа
+- `complete()` - генерация ответа (абстрактный)
 - `find_careers_url()` - поиск страницы вакансий (HTML + sitemap)
 - `find_job_board_url()` - поиск внешнего job board на странице карьеры
 - `find_job_urls()` - поиск URL отдельных вакансий на странице
 - `extract_jobs()` - извлечение вакансий через HybridJobExtractor
 - `extract_jobs_with_pagination()` - извлечение с поддержкой пагинации
 - `translate_job_titles()` - перевод названий на английский
-- Фильтрация не-вакансий (Initiativbewerbung и др.)
+- `extract_company_info()` - извлечение описания компании
+
+Использует Composition для делегирования:
+- `LLMJobExtractor` - извлечение вакансий
+- `LLMUrlDiscovery` - поиск URL карьеры/job board
+
+#### HTML утилиты (`html_utils.py`)
+- `clean_html()` - очистка HTML от скриптов, стилей, cookie dialogs
+- `extract_url()` - извлечение URL из ответа LLM
+- `extract_json()` - парсинг JSON из ответа LLM (markdown блоки, raw JSON)
+
+#### LLMJobExtractor (`job_extraction.py`)
+Извлечение вакансий через LLM:
+- `extract_jobs()` - гибридная экстракция (Schema.org + LLM)
+- `extract_jobs_with_pagination()` - с поддержкой next_page_url
+- `find_job_section()` - поиск секции с вакансиями в HTML
+- `validate_jobs()` - валидация и фильтрация не-вакансий
+- Retry логика при пустых результатах (MAX_LLM_RETRIES)
+
+#### LLMUrlDiscovery (`url_discovery.py`)
+Поиск URL через LLM:
+- `find_careers_url()` - поиск страницы вакансий
+- `find_job_board_url()` - поиск внешнего job board
+- `find_careers_url_from_sitemap()` - поиск в sitemap URLs
+- `find_job_urls()` - поиск URL отдельных вакансий
 
 #### Реализации
-- **OllamaProvider** - локальный Ollama сервер
-- **OpenRouterProvider** - OpenRouter API с Provider Routing:
+- **OllamaProvider** (`ollama.py`) - локальный Ollama сервер
+- **OpenRouterProvider** (`openrouter.py`) - OpenRouter API с Provider Routing:
   - Поддержка 300+ моделей
   - Дефолтная модель: `openai/gpt-oss-120b`
   - Provider routing: выбор конкретного бэкенда (chutes, siliconflow, etc.)
@@ -162,14 +186,48 @@ Pydantic Settings для управления настройками:
   - `openrouter_provider` - конкретный бэкенд
   - `openrouter_allow_fallbacks` - разрешать fallback
 
-### 11. Модели данных (`src/models.py`)
+### 11. Константы (`src/constants.py`)
+
+Централизованные константы:
+- **Пагинация**: `MAX_PAGINATION_PAGES`, `MAX_SITEMAP_URLS`
+- **LLM**: `MAX_LLM_RETRIES`, `MAX_URLS_FOR_LLM`, `LLM_TIMEOUT`
+- **HTML лимиты**: `MIN_JOB_SECTION_SIZE`, `MAX_JOB_SECTION_SIZE`
+- **Браузер**: таймауты для навигации, ожидания, CF challenge
+
+### 12. CacheManager (`src/searchers/cache_manager.py`)
+
+Управление кэшированием career URLs и вакансий:
+- `search_with_cache()` - поиск через кэшированные URL
+- `save_to_cache()` - сохранение career URL и вакансий
+- `_deduplicate_jobs()` - дедупликация по URL или (title, location)
+- Отслеживание изменений (new/removed/reactivated)
+- Автоматическое извлечение информации о компании
+
+### 13. JobExtractor (`src/searchers/job_extraction.py`)
+
+Извлечение вакансий с career pages:
+- `extract_jobs()` - с пагинацией (до MAX_PAGINATION_PAGES страниц)
+- Дедупликация между страницами
+- Автоматическое определение job board платформ
+- Fallback на LLM при отсутствии структурированных данных
+
+### 14. Фильтры (`src/searchers/job_filters.py`)
+
+Фильтрация и нормализация вакансий:
+- `normalize_title()` - удаление gender notation (m/w/d)
+- `normalize_location()` - удаление country/employment type suffixes
+- `filter_jobs_by_search_query()` - фильтрация по поисковому запросу
+- `filter_jobs_by_source_company()` - фильтрация по исходной компании
+
+### 15. Модели данных (`src/models.py`)
 
 Pydantic модели для:
 - Job (вакансия)
 - Location (локация)
+- JobDict, JobExtractionResult (TypedDict для LLM)
 - Валидация и сериализация данных
 
-### 12. Вывод результатов (`src/output.py`)
+### 16. Вывод результатов (`src/output.py`)
 
 Форматирование и сохранение результатов:
 - Красивый вывод в терминал (Rich)
@@ -297,6 +355,7 @@ CLI (history) → JobRepository → job_history table → Output
 | Integration | `test_integration_*.py` | Парсинг с сохранённым HTML (78 тестов) |
 | Job Boards | `test_job_board_parsers.py` | Парсеры платформ (77 тестов) |
 | Filters | `test_website_filters.py` | Фильтрация вакансий (21 тест) |
+| Cache | `test_cache_manager.py` | CacheManager и дедупликация |
 
 ### Структура
 
@@ -306,12 +365,14 @@ tests/
 ├── test_smoke_*.py                # Smoke тесты модулей
 ├── test_integration_parsing.py    # E2E парсинг
 ├── test_job_board_parsers.py      # Lever, Personio, Recruitee, Workable, Greenhouse, Odoo, HRworks
-└── test_website_filters.py        # Фильтрация и нормализация
+├── test_website_filters.py        # Фильтрация и нормализация
+└── test_cache_manager.py          # CacheManager тесты
 ```
 
 ### Запуск
 
 ```bash
-python -m pytest tests/ -q                        # Все тесты (~290 штук, ~1 сек)
+python -m pytest tests/ -q                        # Все тесты (~300 штук, ~1 сек)
 python -m pytest tests/test_job_board_parsers.py  # После изменений в job_boards/
+python -m pytest tests/test_cache_manager.py      # После изменений в cache_manager
 ```

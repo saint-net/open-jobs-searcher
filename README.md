@@ -255,6 +255,7 @@ open-jobs-searcher/
 │   └── jobs.db          # Кэш вакансий и история
 ├── src/
 │   ├── config.py        # Настройки приложения
+│   ├── constants.py     # Глобальные константы
 │   ├── models.py        # Модели данных
 │   ├── output.py        # Вывод результатов
 │   ├── database/        # 💾 SQLite кэширование
@@ -264,24 +265,30 @@ open-jobs-searcher/
 │   ├── extraction/      # 🔍 Гибридная экстракция
 │   │   ├── extractor.py     # HybridJobExtractor
 │   │   ├── candidate.py     # JobCandidate с scoring
-│   │   └── strategies.py    # Стратегии (Schema.org)
+│   │   └── strategies.py    # Стратегии (Schema.org, PDF)
 │   ├── browser/         # Playwright загрузчик (SPA)
-│   │   ├── loader.py    # Загрузчик страниц
-│   │   ├── navigation.py # Навигация по сайту
+│   │   ├── loader.py        # Загрузчик страниц
+│   │   ├── navigation.py    # Навигация по сайту
 │   │   ├── cookie_handler.py # Обработка cookies
-│   │   ├── patterns.py  # Паттерны для поиска
-│   │   └── exceptions.py # Исключения
+│   │   ├── patterns.py      # Паттерны для поиска
+│   │   └── exceptions.py    # Исключения
 │   ├── llm/             # LLM провайдеры
-│   │   ├── base.py      # Базовый класс LLM
-│   │   ├── openrouter.py # OpenRouter провайдер
-│   │   ├── ollama.py    # Ollama провайдер
-│   │   └── prompts.py   # Промпты для парсинга
+│   │   ├── base.py          # Базовый класс LLM
+│   │   ├── html_utils.py    # Утилиты для HTML/JSON
+│   │   ├── job_extraction.py # LLMJobExtractor
+│   │   ├── url_discovery.py # LLMUrlDiscovery
+│   │   ├── openrouter.py    # OpenRouter провайдер
+│   │   ├── ollama.py        # Ollama провайдер
+│   │   └── prompts.py       # Промпты для парсинга
 │   └── searchers/
 │       ├── base.py           # Базовый класс поисковика
 │       ├── hh.py             # HeadHunter API
 │       ├── stepstone.py      # StepStone.de
 │       ├── karriere.py       # Karriere.at
 │       ├── website.py        # Универсальный парсер сайтов
+│       ├── cache_manager.py  # CacheManager (кэширование)
+│       ├── job_extraction.py # JobExtractor (пагинация)
+│       ├── job_filters.py    # Фильтры и нормализация
 │       ├── http_client.py    # HTTP клиент с retry
 │       ├── url_discovery.py  # Поиск careers страниц
 │       └── job_boards/       # Парсеры job-платформ
@@ -293,6 +300,8 @@ open-jobs-searcher/
 │           ├── lever.py      # Lever
 │           ├── workable.py   # Workable
 │           ├── recruitee.py  # Recruitee
+│           ├── hrworks.py    # HRworks
+│           ├── odoo.py       # Odoo CMS
 │           └── deloitte.py   # Deloitte
 └── README.md
 ```

@@ -10,6 +10,7 @@
 | Integration | `test_integration_*.py` | Проверка парсинга с реальным HTML (78 тестов) |
 | Job Boards | `test_job_board_parsers.py` | Тесты парсеров платформ (77 тестов) |
 | Filters | `test_website_filters.py` | Фильтрация вакансий (21 тест) |
+| Cache | `test_cache_manager.py` | CacheManager и дедупликация |
 
 ## Запуск тестов
 
@@ -39,12 +40,13 @@ python -m pytest tests/ -q
 
 | Файл | Тесты |
 |------|-------|
-| `src/llm/base.py` | `test_smoke_llm_base.py`, `test_integration_parsing.py` |
+| `src/llm/base.py`, `html_utils.py`, `job_extraction.py`, `url_discovery.py` | `test_smoke_llm_base.py`, `test_integration_parsing.py` |
 | `src/llm/prompts.py` | `test_smoke_prompts.py` |
 | `src/browser/loader.py` | `test_smoke_browser.py` |
 | `src/extraction/*.py` | `test_smoke_extraction.py`, `test_integration_parsing.py` |
 | `src/searchers/job_boards/*.py` | `test_job_board_parsers.py` |
-| `src/searchers/website.py` | `test_website_filters.py` |
+| `src/searchers/website.py`, `job_extraction.py`, `job_filters.py` | `test_website_filters.py` |
+| `src/searchers/cache_manager.py` | `test_cache_manager.py` |
 
 ### Рекомендуется перед коммитом
 
@@ -82,25 +84,32 @@ tests/
 │   ├── 711media_jobs.html         # 711media.de - Digital
 │   ├── 8com_jobs.html             # 8com.de - Security
 │   └── pdf_links_jobs.html        # PDF links filtering
-├── test_smoke_llm_base.py         # LLM: clean_html, extract_json (35 тестов)
+├── test_smoke_llm_base.py         # LLM/HTML утилиты: clean_html, extract_json (35 тестов)
 ├── test_smoke_prompts.py          # Промпты: форматирование (24 теста)
 ├── test_smoke_browser.py          # Браузер: BrowserLoader (19 тестов)
 ├── test_smoke_extraction.py       # Экстракция: Schema.org (25 тестов)
 ├── test_integration_parsing.py    # Парсинг с реальным HTML (78 тестов)
 ├── test_job_board_parsers.py      # Job Board парсеры (77 тестов)
-└── test_website_filters.py        # Фильтрация вакансий (21 тест)
+├── test_website_filters.py        # Фильтрация вакансий (21 тест)
+└── test_cache_manager.py          # CacheManager тесты
 ```
 
 ## Покрытие тестами
 
-### `test_smoke_llm_base.py` (LLM base)
-- `_clean_html()` - очистка HTML от скриптов, стилей
-- `_extract_json()` - парсинг JSON из ответов LLM
-- `_extract_url()` - извлечение URL из текста
-- `_validate_jobs()` - валидация списка вакансий
-- `_is_non_job_entry()` - фильтрация "не-вакансий"
-- `_find_job_section()` - поиск секции с вакансиями
-- `_extract_links_from_html()` - извлечение ссылок
+### `test_smoke_llm_base.py` (LLM/HTML утилиты)
+
+**html_utils.py:**
+- `clean_html()` - очистка HTML от скриптов, стилей, cookie dialogs
+- `extract_json()` - парсинг JSON из ответов LLM
+- `extract_url()` - извлечение URL из текста
+
+**job_extraction.py:**
+- `validate_jobs()` - валидация списка вакансий
+- `is_non_job_entry()` - фильтрация "не-вакансий" (Initiativbewerbung)
+- `find_job_section()` - поиск секции с вакансиями
+
+**url_discovery.py:**
+- `extract_links_from_html()` - извлечение ссылок
 
 ### `test_smoke_prompts.py` (Промпты)
 - Проверка наличия всех промптов

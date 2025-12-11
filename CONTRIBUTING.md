@@ -50,16 +50,20 @@ python -m pytest tests/test_job_board_parsers.py -v
 ### Новый LLM провайдер
 1. Создайте файл в `src/llm/`
 2. Наследуйте `BaseLLMProvider`
-3. Реализуйте методы:
-   - `complete()` - базовый вызов LLM
-   - Методы для экстракции наследуются от базового класса:
-     - `find_careers_url()` - поиск страницы вакансий
-     - `find_job_board_url()` - поиск внешнего job board
-     - `find_job_urls()` - поиск URL вакансий на странице
-     - `extract_jobs()` - извлечение вакансий через HybridJobExtractor
-     - `extract_jobs_with_pagination()` - извлечение с пагинацией
-     - `translate_job_titles()` - перевод названий на английский
-4. Добавьте в `get_llm_provider()` factory в `src/llm/__init__.py`
+3. Реализуйте метод `complete()` - базовый вызов LLM
+4. Все остальные методы наследуются от базового класса через Composition:
+   - `LLMJobExtractor` - извлечение вакансий
+   - `LLMUrlDiscovery` - поиск URL карьеры/job board
+5. Добавьте в `get_llm_provider()` factory в `src/llm/__init__.py`
+
+**Архитектура LLM модуля:**
+```
+BaseLLMProvider (base.py)
+├── html_utils.py - clean_html, extract_url, extract_json
+├── job_extraction.py - LLMJobExtractor
+├── url_discovery.py - LLMUrlDiscovery
+└── prompts.py - все промпты
+```
 
 ### Новый Job Board парсер
 1. Создайте файл в `src/searchers/job_boards/`
@@ -209,25 +213,27 @@ tests/
 │   ├── 711media_jobs.html         # 711media.de - Digital
 │   ├── 8com_jobs.html             # 8com.de - Security
 │   └── pdf_links_jobs.html        # PDF links filtering
-├── test_smoke_llm_base.py         # Smoke: LLM base методы (35 тестов)
+├── test_smoke_llm_base.py         # Smoke: LLM/HTML утилиты (35 тестов)
 ├── test_smoke_prompts.py          # Smoke: промпты (24 теста)
 ├── test_smoke_browser.py          # Smoke: BrowserLoader (19 тестов)
 ├── test_smoke_extraction.py       # Smoke: экстракция (25 тестов)
 ├── test_integration_parsing.py    # Integration: парсинг с реальным HTML (78 тестов)
 ├── test_job_board_parsers.py      # Job Board парсеры (77 тестов)
-└── test_website_filters.py        # Фильтрация вакансий (21 тест)
+├── test_website_filters.py        # Фильтрация вакансий (21 тест)
+└── test_cache_manager.py          # CacheManager тесты
 ```
 
 ### Когда запускать тесты
 
 | После изменений в | Запустить |
 |-------------------|-----------|
-| `src/llm/base.py` | `pytest tests/test_smoke_llm_base.py tests/test_integration_parsing.py -v` |
+| `src/llm/base.py`, `html_utils.py`, `job_extraction.py`, `url_discovery.py` | `pytest tests/test_smoke_llm_base.py tests/test_integration_parsing.py -v` |
 | `src/llm/prompts.py` | `pytest tests/test_smoke_prompts.py -v` |
 | `src/browser/loader.py` | `pytest tests/test_smoke_browser.py -v` |
 | `src/extraction/*.py` | `pytest tests/test_smoke_extraction.py tests/test_integration_parsing.py -v` |
 | `src/searchers/job_boards/*.py` | `pytest tests/test_job_board_parsers.py -v` |
-| `src/searchers/website.py` | `pytest tests/test_website_filters.py -v` |
+| `src/searchers/website.py`, `job_extraction.py`, `job_filters.py` | `pytest tests/test_website_filters.py -v` |
+| `src/searchers/cache_manager.py` | `pytest tests/test_cache_manager.py -v` |
 
 ### Добавление тестового сайта
 
