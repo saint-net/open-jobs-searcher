@@ -367,7 +367,10 @@ class BrowserLoader:
                             
                             if target == "_blank":
                                 async with page.context.expect_page() as new_page_info:
-                                    await job_link.click()
+                                    try:
+                                        await job_link.click(timeout=10000)
+                                    except Exception:
+                                        await job_link.click(force=True)
                                 new_page = await new_page_info.value
                                 await new_page.wait_for_load_state("domcontentloaded")
                                 await new_page.wait_for_timeout(2500)
@@ -390,14 +393,24 @@ class BrowserLoader:
                                 new_job_link = await find_job_navigation_link(page)
                                 if new_job_link:
                                     try:
-                                        await new_job_link.click()
+                                        await new_job_link.click(timeout=10000)
                                         await page.wait_for_timeout(1500)
                                         final_url = page.url
                                     except Exception:
-                                        pass
+                                        try:
+                                            await new_job_link.click(force=True)
+                                            await page.wait_for_timeout(1500)
+                                            final_url = page.url
+                                        except Exception:
+                                            pass
                                 break
                             else:
-                                await job_link.click()
+                                try:
+                                    await job_link.click(timeout=10000)
+                                except Exception:
+                                    # Fallback: force click to bypass overlays (cookie banners)
+                                    logger.debug("Normal click failed, trying force click")
+                                    await job_link.click(force=True)
                                 await page.wait_for_timeout(2500)
                                 final_url = page.url
                                 
@@ -521,7 +534,10 @@ class BrowserLoader:
                         if target == "_blank":
                             # Обрабатываем клик с открытием новой вкладки
                             async with page.context.expect_page() as new_page_info:
-                                await job_link.click()
+                                try:
+                                    await job_link.click(timeout=10000)
+                                except Exception:
+                                    await job_link.click(force=True)
                             new_page = await new_page_info.value
                             await new_page.wait_for_load_state("domcontentloaded")
                             await new_page.wait_for_timeout(2500)
@@ -535,10 +551,14 @@ class BrowserLoader:
                             if new_job_link:
                                 logger.debug(f"Found job nav link on external site, clicking...")
                                 try:
-                                    await new_job_link.click()
+                                    await new_job_link.click(timeout=10000)
                                     await new_page.wait_for_timeout(1500)
                                 except Exception:
-                                    pass
+                                    try:
+                                        await new_job_link.click(force=True)
+                                        await new_page.wait_for_timeout(1500)
+                                    except Exception:
+                                        pass
                             
                             if is_external_job_board(current_url):
                                 logger.info(f"Navigated to external job board (new tab): {current_url}")
@@ -547,8 +567,11 @@ class BrowserLoader:
                             await new_page.close()
                             break
                         else:
-                            # Обычный клик
-                            await job_link.click()
+                            # Обычный клик (с fallback на force при overlay)
+                            try:
+                                await job_link.click(timeout=10000)
+                            except Exception:
+                                await job_link.click(force=True)
                             # Ждём навигацию или обновление контента
                             await page.wait_for_timeout(2500)
                             
