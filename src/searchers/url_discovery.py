@@ -9,6 +9,8 @@ import tldextract
 
 from bs4 import BeautifulSoup
 
+from src.constants import MAX_SITEMAP_URLS
+
 logger = logging.getLogger(__name__)
 
 
@@ -368,7 +370,7 @@ class CareerUrlDiscovery:
             f"{base}/company/vacancies",
         ]
 
-    async def fetch_all_sitemap_urls(self, base_url: str, max_urls: int = 300) -> list[str]:
+    async def fetch_all_sitemap_urls(self, base_url: str, max_urls: int = MAX_SITEMAP_URLS) -> list[str]:
         """Fetch all URLs from sitemap.xml (checking robots.txt first).
         
         Unlike find_from_sitemap, this returns ALL URLs without filtering.

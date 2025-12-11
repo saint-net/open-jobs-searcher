@@ -11,6 +11,7 @@ import logging
 from bs4 import BeautifulSoup
 
 from src.searchers.job_boards.base import BaseJobBoardParser
+from src.constants import MIN_VALID_HTML_SIZE, MAX_JOB_SECTION_SIZE
 
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ class OdooParser(BaseJobBoardParser):
                 for el in elements:
                     html = str(el)
                     # Size check: must be substantial but not too large
-                    if 1000 < len(html) < 200000:
+                    if MIN_VALID_HTML_SIZE < len(html) < MAX_JOB_SECTION_SIZE:
                         return html
             except Exception:
                 continue

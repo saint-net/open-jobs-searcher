@@ -6,6 +6,14 @@ import re
 from abc import ABC, abstractmethod
 from typing import Optional
 
+from src.constants import (
+    MAX_LLM_RETRIES,
+    MAX_URLS_FOR_LLM,
+    MIN_JOB_SECTION_SIZE,
+    MAX_JOB_SECTION_SIZE,
+    MIN_VALID_HTML_SIZE,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,7 +21,7 @@ class BaseLLMProvider(ABC):
     """Abstract base class for LLM providers."""
     
     # Retry settings for job extraction
-    MAX_EXTRACTION_RETRIES = 3
+    MAX_EXTRACTION_RETRIES = MAX_LLM_RETRIES
 
     @abstractmethod
     async def complete(self, prompt: str, system: Optional[str] = None) -> str:
@@ -191,8 +199,8 @@ class BaseLLMProvider(ABC):
         """
         from .prompts import FIND_CAREERS_FROM_SITEMAP_PROMPT
 
-        # Ограничиваем количество URL (берём первые 500)
-        urls_limited = urls[:500]
+        # Ограничиваем количество URL
+        urls_limited = urls[:MAX_URLS_FOR_LLM]
         urls_text = "\n".join(urls_limited)
 
         prompt = FIND_CAREERS_FROM_SITEMAP_PROMPT.format(
@@ -557,8 +565,8 @@ class BaseLLMProvider(ABC):
                     if any(marker in el_text for marker in ['(m/w/d)', '(m/f/d)', 'vollzeit', 'teilzeit', 'job', 'position', 'stelle', 'develop', 'engineer', 'manager']):
                         html = str(el)
                         # Size check: must be substantial but not too large
-                        # Lower limit to 300 to catch individual job cards, upper remains 200k
-                        if 300 < len(html) < 200000:
+                        # Check size limits for job section
+                        if MIN_JOB_SECTION_SIZE < len(html) < MAX_JOB_SECTION_SIZE:
                             valid_elements.append(html)
                 
                 if valid_elements:

@@ -12,12 +12,10 @@ from src.searchers.job_boards import (
 )
 from src.searchers.job_filters import normalize_title, normalize_location
 from src.extraction.strategies import PdfLinkStrategy, SchemaOrgStrategy
+from src.constants import MAX_PAGINATION_PAGES
 
 logger = logging.getLogger(__name__)
 console = Console()
-
-# Maximum pages to scan (to avoid infinite loops)
-MAX_PAGINATION_PAGES = 3
 
 
 class JobExtractor:
