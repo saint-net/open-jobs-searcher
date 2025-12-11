@@ -21,6 +21,7 @@ from src.searchers.job_filters import (
 from src.searchers.job_extraction import JobExtractor
 from src.searchers.cache_manager import CacheManager
 from src.llm.base import BaseLLMProvider
+from src.llm.cache import LLMCache
 from src.browser import DomainUnreachableError, PlaywrightBrowsersNotInstalledError
 from src.database import JobRepository
 from src.database.models import SyncResult
@@ -56,6 +57,7 @@ class WebsiteSearcher(BaseSearcher):
         self._browser_loader = None
         self._job_extractor = None
         self._cache_manager = None
+        self._llm_cache = None
         
         # Last sync result (for reporting new/removed jobs)
         self.last_sync_result: Optional[SyncResult] = None
@@ -67,6 +69,11 @@ class WebsiteSearcher(BaseSearcher):
         
         # Database repository for caching
         self._repository = JobRepository() if use_cache else None
+        
+        # Set up LLM cache if caching is enabled
+        if use_cache and self._repository:
+            self._llm_cache = LLMCache(self._repository)
+            self.llm.set_cache(self._llm_cache)
 
     async def _get_browser_loader(self):
         """Get or create BrowserLoader."""

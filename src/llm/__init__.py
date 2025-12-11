@@ -3,6 +3,7 @@
 from .base import BaseLLMProvider
 from .ollama import OllamaProvider
 from .openrouter import OpenRouterProvider
+from .cache import LLMCache, CacheNamespace
 
 from src.config import settings
 
@@ -39,7 +40,14 @@ def get_llm_provider(provider: str = "ollama", **kwargs) -> BaseLLMProvider:
             raise ValueError(f"Unknown LLM provider: {provider}")
 
 
-__all__ = ["BaseLLMProvider", "OllamaProvider", "OpenRouterProvider", "get_llm_provider"]
+__all__ = [
+    "BaseLLMProvider", 
+    "OllamaProvider", 
+    "OpenRouterProvider", 
+    "get_llm_provider",
+    "LLMCache",
+    "CacheNamespace",
+]
 
 
 

@@ -1,7 +1,7 @@
 """Database module for job caching and tracking."""
 
 from src.database.connection import get_db_path, init_database
-from src.database.models import Site, CareerUrl, CachedJob, JobHistoryEvent
+from src.database.models import Site, CareerUrl, CachedJob, JobHistoryEvent, LLMCacheEntry, LLMCacheStats
 from src.database.repository import JobRepository
 
 __all__ = [
@@ -11,6 +11,8 @@ __all__ = [
     "CareerUrl",
     "CachedJob",
     "JobHistoryEvent",
+    "LLMCacheEntry",
+    "LLMCacheStats",
     "JobRepository",
 ]
 

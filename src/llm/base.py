@@ -2,10 +2,13 @@
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from src.models import JobDict, JobExtractionResult
 from .html_utils import clean_html, extract_url, extract_json, html_to_markdown
+
+if TYPE_CHECKING:
+    from .cache import LLMCache
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +18,7 @@ class BaseLLMProvider(ABC):
     
     _job_extractor = None  # Lazy-initialized LLMJobExtractor
     _url_discovery = None  # Lazy-initialized LLMUrlDiscovery
+    _cache: Optional["LLMCache"] = None  # Optional LLM response cache
     
     def _get_job_extractor(self):
         """Get or create job extractor instance."""
@@ -41,6 +45,14 @@ class BaseLLMProvider(ABC):
                 complete_json_fn=self.complete_json,
             )
         return self._url_discovery
+    
+    def set_cache(self, cache: "LLMCache") -> None:
+        """Set LLM response cache.
+        
+        Args:
+            cache: LLMCache instance for caching responses
+        """
+        self._cache = cache
 
     @abstractmethod
     async def complete(self, prompt: str, system: Optional[str] = None) -> str:
@@ -106,6 +118,15 @@ class BaseLLMProvider(ABC):
             return titles
 
         titles_text = "\n".join(titles)
+        
+        # Try cache first (translations are very stable, 30 day TTL)
+        if self._cache:
+            from .cache import CacheNamespace, estimate_tokens
+            cached = await self._cache.get(CacheNamespace.TRANSLATION, titles_text)
+            if cached is not None and isinstance(cached, list) and len(cached) == len(titles):
+                logger.debug(f"Translation cache hit for {len(titles)} titles")
+                return [str(t) for t in cached]
+        
         prompt = TRANSLATE_JOB_TITLES_PROMPT.format(titles=titles_text)
 
         # Use structured output for guaranteed valid JSON
@@ -126,7 +147,19 @@ class BaseLLMProvider(ABC):
                     translated = values[0]
 
         if isinstance(translated, list) and len(translated) == len(titles):
-            return [str(t) for t in translated]
+            result = [str(t) for t in translated]
+            
+            # Cache successful translation
+            if self._cache:
+                from .cache import CacheNamespace, estimate_tokens
+                await self._cache.set(
+                    CacheNamespace.TRANSLATION, 
+                    titles_text, 
+                    result,
+                    tokens_estimate=estimate_tokens(titles_text)
+                )
+            
+            return result
         
         logger.warning("Translation failed, returning original titles")
         logger.debug(f"Expected {len(titles)} titles, got: {type(translated).__name__} = {str(translated)[:100]}...")
@@ -158,6 +191,18 @@ class BaseLLMProvider(ABC):
     async def extract_company_info(self, html: str, url: str) -> Optional[str]:
         """Extract company description from website HTML."""
         from .prompts import EXTRACT_COMPANY_INFO_PROMPT
+        from urllib.parse import urlparse
+
+        # Use domain as cache key (company info is very stable)
+        domain = urlparse(url).netloc
+        
+        # Try cache first (company info rarely changes, 30 day TTL)
+        if self._cache:
+            from .cache import CacheNamespace
+            cached = await self._cache.get(CacheNamespace.COMPANY_INFO, domain)
+            if cached is not None and isinstance(cached, str):
+                logger.debug(f"Company info cache hit for {domain}")
+                return cached
 
         cleaned = clean_html(html)
         html_truncated = cleaned[:40000] if len(cleaned) > 40000 else cleaned
@@ -176,12 +221,45 @@ class BaseLLMProvider(ABC):
         if description.startswith('"') and description.endswith('"'):
             description = description[1:-1]
         
+        # Cache successful extraction
+        if self._cache:
+            from .cache import CacheNamespace, estimate_tokens
+            await self._cache.set(
+                CacheNamespace.COMPANY_INFO,
+                domain,
+                description,
+                tokens_estimate=estimate_tokens(html_truncated)
+            )
+        
         logger.debug(f"Extracted company info: {description[:100]}...")
         return description
 
     async def extract_jobs(self, html: str, url: str, page=None) -> list[JobDict]:
         """Extract job listings from HTML page using hybrid approach."""
-        return await self._get_job_extractor().extract_jobs(html, url, page)
+        # Try cache first (job listings change frequently, 6 hour TTL)
+        if self._cache:
+            from .cache import CacheNamespace, estimate_tokens
+            # Use markdown for cache key (normalized content)
+            content_for_key = html_to_markdown(html)
+            cached = await self._cache.get(CacheNamespace.JOBS, content_for_key)
+            if cached is not None and isinstance(cached, list):
+                logger.debug(f"Job extraction cache hit for {url}")
+                return cached
+        
+        result = await self._get_job_extractor().extract_jobs(html, url, page)
+        
+        # Cache successful extraction (only if we have jobs)
+        if self._cache and result:
+            from .cache import CacheNamespace, estimate_tokens
+            content_for_key = html_to_markdown(html)
+            await self._cache.set(
+                CacheNamespace.JOBS,
+                content_for_key,
+                result,
+                tokens_estimate=estimate_tokens(content_for_key)
+            )
+        
+        return result
     
     async def extract_jobs_with_pagination(self, html: str, url: str) -> JobExtractionResult:
         """Extract job listings with pagination info using LLM directly."""
@@ -201,8 +279,9 @@ class BaseLLMProvider(ABC):
         return extract_json(response)
 
     async def close(self):
-        """Закрыть соединения."""
-        pass
+        """Закрыть соединения и залогировать статистику кэша."""
+        if self._cache:
+            self._cache.log_session_stats()
 
     async def __aenter__(self):
         return self

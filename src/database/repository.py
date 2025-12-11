@@ -11,7 +11,7 @@ from typing import Optional
 import aiosqlite
 
 from src.database.connection import get_db_path, init_database
-from src.database.models import Site, CareerUrl, CachedJob, SyncResult
+from src.database.models import Site, CareerUrl, CachedJob, SyncResult, LLMCacheEntry, LLMCacheStats
 from src.models import Job
 
 logger = logging.getLogger(__name__)
@@ -645,5 +645,160 @@ class JobRepository:
             last_seen_at=self._parse_datetime(row["last_seen_at"]),
             is_active=bool(row["is_active"]),
         )
+    
+    # ==================== LLM Cache ====================
+    
+    async def get_llm_cache(self, key: str) -> Optional[LLMCacheEntry]:
+        """Get LLM cache entry by key.
+        
+        Args:
+            key: Cache key (hash of prompt + model)
+            
+        Returns:
+            LLMCacheEntry if found and not expired, None otherwise
+        """
+        db = await self._get_connection()
+        cursor = await db.execute(
+            """
+            SELECT * FROM llm_cache 
+            WHERE key = ? 
+            AND datetime(created_at, '+' || ttl_seconds || ' seconds') > datetime('now')
+            """,
+            (key,)
+        )
+        row = await cursor.fetchone()
+        
+        if row:
+            # Update hit count
+            await db.execute(
+                "UPDATE llm_cache SET hit_count = hit_count + 1 WHERE key = ?",
+                (key,)
+            )
+            await db.commit()
+            
+            return LLMCacheEntry(
+                key=row["key"],
+                namespace=row["namespace"],
+                value=row["value"],
+                model=row["model"],
+                ttl_seconds=row["ttl_seconds"],
+                created_at=self._parse_datetime(row["created_at"]),
+                hit_count=row["hit_count"] + 1,
+                tokens_saved=row["tokens_saved"],
+            )
+        return None
+    
+    async def set_llm_cache(
+        self,
+        key: str,
+        namespace: str,
+        value: str,
+        ttl_seconds: int,
+        model: Optional[str] = None,
+        tokens_saved: int = 0
+    ) -> None:
+        """Set LLM cache entry.
+        
+        Args:
+            key: Cache key (hash of prompt + model)
+            namespace: Cache namespace (e.g., 'jobs', 'translation', 'url')
+            value: Cached response (JSON string)
+            ttl_seconds: Time to live in seconds
+            model: LLM model name
+            tokens_saved: Estimated tokens this cache will save
+        """
+        db = await self._get_connection()
+        await db.execute(
+            """
+            INSERT INTO llm_cache (key, namespace, value, model, ttl_seconds, tokens_saved)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                ttl_seconds = excluded.ttl_seconds,
+                created_at = CURRENT_TIMESTAMP,
+                hit_count = 0,
+                tokens_saved = excluded.tokens_saved
+            """,
+            (key, namespace, value, model, ttl_seconds, tokens_saved)
+        )
+        await db.commit()
+    
+    async def get_llm_cache_stats(self, namespace: Optional[str] = None) -> LLMCacheStats:
+        """Get LLM cache statistics.
+        
+        Args:
+            namespace: Filter by namespace (optional)
+            
+        Returns:
+            LLMCacheStats with hit/miss counts
+        """
+        db = await self._get_connection()
+        
+        if namespace:
+            cursor = await db.execute(
+                """
+                SELECT 
+                    SUM(hit_count) as total_hits,
+                    COUNT(*) as total_entries,
+                    SUM(tokens_saved * hit_count) as total_tokens_saved
+                FROM llm_cache
+                WHERE namespace = ?
+                """,
+                (namespace,)
+            )
+        else:
+            cursor = await db.execute(
+                """
+                SELECT 
+                    SUM(hit_count) as total_hits,
+                    COUNT(*) as total_entries,
+                    SUM(tokens_saved * hit_count) as total_tokens_saved
+                FROM llm_cache
+                """
+            )
+        
+        row = await cursor.fetchone()
+        
+        return LLMCacheStats(
+            hits=row["total_hits"] or 0,
+            misses=row["total_entries"] or 0,  # Each entry was a miss once
+            total_tokens_saved=row["total_tokens_saved"] or 0,
+        )
+    
+    async def cleanup_expired_cache(self) -> int:
+        """Remove expired cache entries.
+        
+        Returns:
+            Number of entries removed
+        """
+        db = await self._get_connection()
+        cursor = await db.execute(
+            """
+            DELETE FROM llm_cache 
+            WHERE datetime(created_at, '+' || ttl_seconds || ' seconds') < datetime('now')
+            """
+        )
+        await db.commit()
+        return cursor.rowcount
+    
+    async def clear_llm_cache(self, namespace: Optional[str] = None) -> int:
+        """Clear LLM cache.
+        
+        Args:
+            namespace: Clear only specific namespace (optional)
+            
+        Returns:
+            Number of entries removed
+        """
+        db = await self._get_connection()
+        if namespace:
+            cursor = await db.execute(
+                "DELETE FROM llm_cache WHERE namespace = ?",
+                (namespace,)
+            )
+        else:
+            cursor = await db.execute("DELETE FROM llm_cache")
+        await db.commit()
+        return cursor.rowcount
 
 

@@ -60,6 +60,28 @@ async def _run_migrations(db) -> None:
         logger.debug("Adding 'description' column to sites table")
         await db.execute("ALTER TABLE sites ADD COLUMN description TEXT")
         await db.commit()
+    
+    # Migration: Create llm_cache table if it doesn't exist
+    cursor = await db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='llm_cache'"
+    )
+    if not await cursor.fetchone():
+        logger.debug("Creating 'llm_cache' table")
+        await db.execute("""
+            CREATE TABLE llm_cache (
+                key TEXT PRIMARY KEY,
+                namespace TEXT NOT NULL,
+                value TEXT NOT NULL,
+                model TEXT,
+                ttl_seconds INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                hit_count INTEGER DEFAULT 0,
+                tokens_saved INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("CREATE INDEX idx_llm_cache_namespace ON llm_cache(namespace)")
+        await db.execute("CREATE INDEX idx_llm_cache_expiry ON llm_cache(created_at, ttl_seconds)")
+        await db.commit()
 
 
 SCHEMA = """
@@ -130,12 +152,26 @@ CREATE TABLE IF NOT EXISTS job_history (
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 );
 
+-- LLM response cache (with different TTLs per operation type)
+CREATE TABLE IF NOT EXISTS llm_cache (
+    key TEXT PRIMARY KEY,
+    namespace TEXT NOT NULL,
+    value TEXT NOT NULL,
+    model TEXT,
+    ttl_seconds INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    hit_count INTEGER DEFAULT 0,
+    tokens_saved INTEGER DEFAULT 0
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_sites_domain ON sites(domain);
 CREATE INDEX IF NOT EXISTS idx_career_urls_site_id ON career_urls(site_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_site_id ON jobs(site_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_is_active ON jobs(is_active);
 CREATE INDEX IF NOT EXISTS idx_job_history_job_id ON job_history(job_id);
+CREATE INDEX IF NOT EXISTS idx_llm_cache_namespace ON llm_cache(namespace);
+CREATE INDEX IF NOT EXISTS idx_llm_cache_expiry ON llm_cache(created_at, ttl_seconds);
 """
 
 

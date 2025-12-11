@@ -83,3 +83,45 @@ class SyncResult:
         return bool(self.new_jobs or self.removed_jobs or self.reactivated_jobs)
 
 
+@dataclass
+class LLMCacheEntry:
+    """LLM response cache entry."""
+    
+    key: str
+    namespace: str
+    value: str
+    ttl_seconds: int
+    model: Optional[str] = None
+    created_at: Optional[datetime] = None
+    hit_count: int = 0
+    tokens_saved: int = 0
+    
+    def is_expired(self) -> bool:
+        """Check if cache entry has expired."""
+        if not self.created_at:
+            return True
+        from datetime import timedelta
+        expiry = self.created_at + timedelta(seconds=self.ttl_seconds)
+        return datetime.now() > expiry
+
+
+@dataclass
+class LLMCacheStats:
+    """Statistics for LLM cache usage."""
+    
+    hits: int = 0
+    misses: int = 0
+    total_tokens_saved: int = 0
+    
+    @property
+    def hit_rate(self) -> float:
+        """Calculate cache hit rate."""
+        total = self.hits + self.misses
+        return self.hits / total if total > 0 else 0.0
+    
+    @property
+    def estimated_cost_saved(self) -> float:
+        """Estimate cost saved (rough approximation: $0.01 per 1K tokens)."""
+        return self.total_tokens_saved * 0.00001
+
+
