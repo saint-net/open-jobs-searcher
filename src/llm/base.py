@@ -1,6 +1,7 @@
 """Base class for LLM providers."""
 
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Optional, TYPE_CHECKING
 
@@ -11,6 +12,56 @@ if TYPE_CHECKING:
     from .cache import LLMCache
 
 logger = logging.getLogger(__name__)
+
+
+# Pre-compiled translation patterns for German → English job titles
+# Order matters: longer/more specific patterns first
+TRANSLATION_RULES = [
+    # Full compound words (longest first)
+    (re.compile(r'systemadministrator', re.IGNORECASE), 'System Administrator'),
+    (re.compile(r'teamleitung', re.IGNORECASE), 'Team Lead'),
+    (re.compile(r'teamleiter', re.IGNORECASE), 'Team Lead'),
+    (re.compile(r'abteilungsleiter', re.IGNORECASE), 'Department Head'),
+    (re.compile(r'geschäftsführer', re.IGNORECASE), 'Managing Director'),
+    (re.compile(r'projektleiter', re.IGNORECASE), 'Project Manager'),
+    (re.compile(r'produktmanager', re.IGNORECASE), 'Product Manager'),
+    (re.compile(r'kundenservice', re.IGNORECASE), 'Customer Service'),
+    (re.compile(r'kundendienst', re.IGNORECASE), 'Customer Service'),
+    (re.compile(r'werkstudent', re.IGNORECASE), 'Working Student'),
+    (re.compile(r'auszubildende[r]?', re.IGNORECASE), 'Apprentice'),
+    (re.compile(r'praktikantin', re.IGNORECASE), 'Intern'),
+    (re.compile(r'praktikant', re.IGNORECASE), 'Intern'),
+    (re.compile(r'stellvertretender?', re.IGNORECASE), 'Deputy'),
+    (re.compile(r'kauffrau', re.IGNORECASE), 'Commercial Clerk'),
+    (re.compile(r'kaufmann', re.IGNORECASE), 'Commercial Clerk'),
+    # Role words
+    (re.compile(r'entwickler', re.IGNORECASE), 'Developer'),
+    (re.compile(r'ingenieur', re.IGNORECASE), 'Engineer'),
+    (re.compile(r'referent', re.IGNORECASE), 'Specialist'),
+    (re.compile(r'berater', re.IGNORECASE), 'Consultant'),
+    (re.compile(r'analyst', re.IGNORECASE), 'Analyst'),
+    (re.compile(r'architekt', re.IGNORECASE), 'Architect'),
+    (re.compile(r'spezialist', re.IGNORECASE), 'Specialist'),
+    (re.compile(r'fachkraft', re.IGNORECASE), 'Specialist'),
+    (re.compile(r'experte', re.IGNORECASE), 'Expert'),
+    (re.compile(r'meister', re.IGNORECASE), 'Master'),
+    (re.compile(r'techniker', re.IGNORECASE), 'Technician'),
+    (re.compile(r'assistentin', re.IGNORECASE), 'Assistant'),
+    (re.compile(r'assistent', re.IGNORECASE), 'Assistant'),
+    (re.compile(r'sachbearbeiter', re.IGNORECASE), 'Clerk'),
+    (re.compile(r'mitarbeiter', re.IGNORECASE), 'Employee'),
+    (re.compile(r'leiter', re.IGNORECASE), 'Lead'),
+    # Connectors (with word boundaries via spaces)
+    (re.compile(r' für ', re.IGNORECASE), ' for '),
+    (re.compile(r' und ', re.IGNORECASE), ' and '),
+    (re.compile(r' oder ', re.IGNORECASE), ' or '),
+    (re.compile(r' im ', re.IGNORECASE), ' in '),
+    (re.compile(r' bei ', re.IGNORECASE), ' at '),
+    (re.compile(r' interne ', re.IGNORECASE), ' internal '),
+    # Employment type
+    (re.compile(r'vollzeit', re.IGNORECASE), 'Full-time'),
+    (re.compile(r'teilzeit', re.IGNORECASE), 'Part-time'),
+]
 
 
 class BaseLLMProvider(ABC):
@@ -184,66 +235,17 @@ class BaseLLMProvider(ABC):
         return self._translate_with_dictionary(titles)
     
     def _translate_with_dictionary(self, titles: list[str]) -> list[str]:
-        """Fallback translation using dictionary for common German job terms."""
-        # Common German → English job title translations
-        # Order matters: longer/more specific patterns first
-        translations = [
-            # Full words/phrases (order: longer first)
-            ('systemadministrator', 'System Administrator'),
-            ('teamleitung', 'Team Lead'),
-            ('teamleiter', 'Team Lead'),
-            ('abteilungsleiter', 'Department Head'),
-            ('geschäftsführer', 'Managing Director'),
-            ('projektleiter', 'Project Manager'),
-            ('produktmanager', 'Product Manager'),
-            ('kundenservice', 'Customer Service'),
-            ('kundendienst', 'Customer Service'),
-            ('werkstudent', 'Working Student'),
-            ('praktikantin', 'Intern'),
-            ('praktikant', 'Intern'),
-            ('stellvertretender', 'Deputy'),
-            # Role words
-            ('entwickler', 'Developer'),
-            ('ingenieur', 'Engineer'),
-            ('leiter', 'Lead'),
-            ('berater', 'Consultant'),
-            ('analyst', 'Analyst'),
-            ('architekt', 'Architect'),
-            ('spezialist', 'Specialist'),
-            ('fachkraft', 'Specialist'),
-            ('experte', 'Expert'),
-            ('assistentin', 'Assistant'),
-            ('assistent', 'Assistant'),
-            ('sachbearbeiter', 'Clerk'),
-            ('mitarbeiter', 'Employee'),
-            # Connectors (exact word boundaries)
-            (' für ', ' for '),
-            (' und ', ' and '),
-            (' oder ', ' or '),
-            (' im ', ' in '),
-            (' bei ', ' at '),
-            (' interne ', ' internal '),
-        ]
+        """Fallback translation using pre-compiled patterns for German job terms.
         
+        Uses TRANSLATION_RULES defined at module level for performance.
+        """
         result = []
         for title in titles:
-            translated_title = title
-            title_lower = translated_title.lower()
-            
-            for de, en in translations:
-                if de in title_lower:
-                    import re
-                    # Use word boundary for short words, case-insensitive
-                    if len(de) <= 4 or de.startswith(' '):
-                        pattern = re.compile(re.escape(de), re.IGNORECASE)
-                    else:
-                        # For longer words, match as substring
-                        pattern = re.compile(re.escape(de), re.IGNORECASE)
-                    
-                    translated_title = pattern.sub(en, translated_title)
-                    title_lower = translated_title.lower()  # Update for next iteration
-            
-            result.append(translated_title)
+            translated = title
+            for pattern, replacement in TRANSLATION_RULES:
+                translated = pattern.sub(replacement, translated)
+            result.append(translated)
+        return result
         
         return result
 
