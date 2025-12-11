@@ -147,23 +147,105 @@ class BaseLLMProvider(ABC):
                     translated = values[0]
 
         if isinstance(translated, list) and len(translated) == len(titles):
-            result = [str(t) for t in translated]
+            # Validate each translation is a proper string
+            result = []
+            valid = True
+            for t in translated:
+                if not isinstance(t, str):
+                    valid = False
+                    break
+                # Check for garbage responses (encoding issues, error messages)
+                if '\xa0?' in t or '\\xa0' in t or t == '...' or 'error' in t.lower():
+                    valid = False
+                    break
+                result.append(t.strip())
             
-            # Cache successful translation
-            if self._cache:
-                from .cache import CacheNamespace, estimate_tokens
-                await self._cache.set(
-                    CacheNamespace.TRANSLATION, 
-                    titles_text, 
-                    result,
-                    tokens_estimate=estimate_tokens(titles_text)
-                )
+            if valid and len(result) == len(titles):
+                # Cache successful translation
+                if self._cache:
+                    from .cache import CacheNamespace, estimate_tokens
+                    await self._cache.set(
+                        CacheNamespace.TRANSLATION, 
+                        titles_text, 
+                        result,
+                        tokens_estimate=estimate_tokens(titles_text)
+                    )
+                
+                return result
             
-            return result
+            logger.warning("Translation response contained invalid data, using fallback")
         
-        logger.warning("Translation failed, returning original titles")
+        # Fallback: use dictionary-based translation for common German words
+        logger.debug("Using dictionary fallback for translation")
+        return self._translate_with_dictionary(titles)
+        
+        logger.warning("Translation failed, using dictionary fallback")
         logger.debug(f"Expected {len(titles)} titles, got: {type(translated).__name__} = {str(translated)[:100]}...")
-        return titles
+        return self._translate_with_dictionary(titles)
+    
+    def _translate_with_dictionary(self, titles: list[str]) -> list[str]:
+        """Fallback translation using dictionary for common German job terms."""
+        # Common German → English job title translations
+        # Order matters: longer/more specific patterns first
+        translations = [
+            # Full words/phrases (order: longer first)
+            ('systemadministrator', 'System Administrator'),
+            ('teamleitung', 'Team Lead'),
+            ('teamleiter', 'Team Lead'),
+            ('abteilungsleiter', 'Department Head'),
+            ('geschäftsführer', 'Managing Director'),
+            ('projektleiter', 'Project Manager'),
+            ('produktmanager', 'Product Manager'),
+            ('kundenservice', 'Customer Service'),
+            ('kundendienst', 'Customer Service'),
+            ('werkstudent', 'Working Student'),
+            ('praktikantin', 'Intern'),
+            ('praktikant', 'Intern'),
+            ('stellvertretender', 'Deputy'),
+            # Role words
+            ('entwickler', 'Developer'),
+            ('ingenieur', 'Engineer'),
+            ('leiter', 'Lead'),
+            ('berater', 'Consultant'),
+            ('analyst', 'Analyst'),
+            ('architekt', 'Architect'),
+            ('spezialist', 'Specialist'),
+            ('fachkraft', 'Specialist'),
+            ('experte', 'Expert'),
+            ('assistentin', 'Assistant'),
+            ('assistent', 'Assistant'),
+            ('sachbearbeiter', 'Clerk'),
+            ('mitarbeiter', 'Employee'),
+            # Connectors (exact word boundaries)
+            (' für ', ' for '),
+            (' und ', ' and '),
+            (' oder ', ' or '),
+            (' im ', ' in '),
+            (' bei ', ' at '),
+            (' interne ', ' internal '),
+        ]
+        
+        result = []
+        for title in titles:
+            translated_title = title
+            title_lower = translated_title.lower()
+            
+            for de, en in translations:
+                if de in title_lower:
+                    import re
+                    # Use word boundary for short words, case-insensitive
+                    if len(de) <= 4 or de.startswith(' '):
+                        pattern = re.compile(re.escape(de), re.IGNORECASE)
+                    else:
+                        # For longer words, match as substring
+                        pattern = re.compile(re.escape(de), re.IGNORECASE)
+                    
+                    translated_title = pattern.sub(en, translated_title)
+                    title_lower = translated_title.lower()  # Update for next iteration
+            
+            result.append(translated_title)
+        
+        return result
 
     def _titles_look_english(self, titles: list[str]) -> bool:
         """Check if titles are likely already in English."""
