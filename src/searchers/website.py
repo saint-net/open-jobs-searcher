@@ -15,12 +15,11 @@ from src.searchers.job_boards import (
     find_external_job_board,
 )
 from src.searchers.job_filters import (
-    normalize_title,
-    normalize_location,
     filter_jobs_by_search_query,
     filter_jobs_by_source_company,
 )
 from src.searchers.job_extraction import JobExtractor
+from src.searchers.cache_manager import CacheManager
 from src.llm.base import BaseLLMProvider
 from src.browser import DomainUnreachableError, PlaywrightBrowsersNotInstalledError
 from src.database import JobRepository
@@ -56,6 +55,7 @@ class WebsiteSearcher(BaseSearcher):
         self.use_cache = use_cache
         self._browser_loader = None
         self._job_extractor = None
+        self._cache_manager = None
         
         # Last sync result (for reporting new/removed jobs)
         self.last_sync_result: Optional[SyncResult] = None
@@ -86,6 +86,19 @@ class WebsiteSearcher(BaseSearcher):
                 fetch_jobs_from_api=self._fetch_jobs_from_api,
             )
         return self._job_extractor
+
+    def _get_cache_manager(self) -> CacheManager:
+        """Get or create CacheManager."""
+        if self._cache_manager is None:
+            self._cache_manager = CacheManager(
+                repository=self._repository,
+                extract_jobs=self._get_job_extractor().extract_jobs,
+                convert_jobs=self._convert_jobs_data,
+                fetch_html=self._fetch,
+                extract_company_info=self.llm.extract_company_info,
+                extract_company_name=self._extract_company_name,
+            )
+        return self._cache_manager
 
     async def search(
         self,
@@ -143,8 +156,10 @@ class WebsiteSearcher(BaseSearcher):
             
             # Try to use cached career URLs first
             if self.use_cache and self._repository:
-                jobs = await self._search_with_cache(url, domain)
+                cache_mgr = self._get_cache_manager()
+                jobs = await cache_mgr.search_with_cache(url, domain)
                 if jobs is not None:  # None means cache miss or all URLs failed
+                    self.last_sync_result = cache_mgr.last_sync_result
                     return jobs
             
             # Full discovery (first time or cache miss)
@@ -153,140 +168,6 @@ class WebsiteSearcher(BaseSearcher):
         except DomainUnreachableError as e:
             logger.error(f"Domain unreachable: {url} - {e}")
             return []
-    
-    async def _search_with_cache(self, url: str, domain: str) -> Optional[list[Job]]:
-        """Try to search using cached career URLs.
-        
-        Args:
-            url: Original URL
-            domain: Site domain
-            
-        Returns:
-            List of jobs if cache hit and successful, None if should fall back to full discovery
-        """
-        site = await self._repository.get_site_by_domain(domain)
-        if not site:
-            logger.debug(f"No cached data for {domain}, will do full discovery")
-            return None
-        
-        # Get cached career URLs
-        career_urls = await self._repository.get_career_urls(site.id)
-        if not career_urls:
-            logger.debug(f"No cached career URLs for {domain}, will do full discovery")
-            return None
-        
-        logger.info(f"Using {len(career_urls)} cached career URL(s) for {domain}")
-        
-        # Try each cached URL
-        all_jobs_data = []
-        working_url = None
-        
-        for career_url in career_urls:
-            try:
-                logger.debug(f"Trying cached URL: {career_url.url}")
-                jobs_data = await self._get_job_extractor().extract_jobs(career_url.url, url)
-                
-                if jobs_data:
-                    all_jobs_data.extend(jobs_data)
-                    working_url = career_url
-                    await self._repository.mark_url_success(career_url.id)
-                    logger.debug(f"Cached URL worked: {len(jobs_data)} jobs from {career_url.url}")
-                else:
-                    # No jobs found - might be suspicious
-                    prev_count = await self._repository.get_previous_job_count(site.id)
-                    if prev_count > 5:
-                        # Had many jobs before, now 0 - URL might be broken
-                        logger.warning(f"Suspicious: {prev_count} jobs -> 0 at {career_url.url}")
-                        is_inactive = await self._repository.mark_url_failed(career_url.id)
-                        if is_inactive:
-                            continue
-                    
-            except Exception as e:
-                logger.warning(f"Cached URL failed: {career_url.url} - {e}")
-                await self._repository.mark_url_failed(career_url.id)
-                continue
-        
-        if not all_jobs_data:
-            # All cached URLs failed - fall back to full discovery
-            logger.info(f"All cached URLs failed for {domain}, falling back to full discovery")
-            return None
-        
-        # Filter jobs by source company if using external career portal
-        if working_url:
-            career_domain = urlparse(working_url.url).netloc
-            source_domain = urlparse(url).netloc.replace('www.', '')
-            if career_domain != source_domain and career_domain != f"www.{source_domain}":
-                # External career portal - filter by source company
-                logger.debug(f"Filtering jobs from external portal {career_domain} for {source_domain}")
-                all_jobs_data = filter_jobs_by_source_company(all_jobs_data, url)
-        
-        # Deduplicate by URL (primary) or (title, location) (fallback)
-        seen = set()
-        unique_jobs_data = []
-        base_page = (working_url.url if working_url else url).rstrip('/')
-        for job_data in all_jobs_data:
-            job_url = job_data.get("url", "")
-            # Handle None or "None" as empty
-            if job_url is None or job_url == "None" or job_url == "null":
-                job_url = ""
-            else:
-                job_url = str(job_url).strip()
-            
-            # Treat non-unique URLs as empty:
-            # - URL is same as current page
-            # - URL ends with # (anchor without ID)
-            # - URL is current page + #
-            if job_url:
-                job_url_clean = job_url.rstrip('/')
-                if (job_url_clean == base_page or 
-                    job_url.endswith('#') or 
-                    job_url_clean == base_page + '#'):
-                    job_url = ""
-            
-            title_loc_key = (
-                normalize_title(job_data.get("title", "")),
-                normalize_location(job_data.get("location", ""))
-            )
-            
-            # Use URL as key if available, otherwise title+location
-            key = job_url if job_url else title_loc_key
-            
-            if key not in seen:
-                seen.add(key)
-                unique_jobs_data.append(job_data)
-        
-        # Translate and convert to Job objects
-        jobs = await self._convert_jobs_data(unique_jobs_data, url, working_url.url if working_url else url)
-        
-        # Sync with database and track changes
-        sync_result = await self._repository.sync_jobs(site.id, jobs)
-        self.last_sync_result = sync_result
-        
-        # Extract company info if not yet available
-        if not site.description:
-            try:
-                main_page_url = f"https://{domain}"
-                html = await self._fetch(main_page_url)
-                if html:
-                    description = await self.llm.extract_company_info(html, main_page_url)
-                    if description:
-                        await self._repository.update_site_description(site.id, description)
-                        logger.info(f"Extracted company info for {domain}: {description[:50]}...")
-            except Exception as e:
-                logger.warning(f"Failed to extract company info for {domain}: {e}")
-        
-        # Update site scan timestamp
-        await self._repository.update_site_scanned(site.id)
-        
-        if sync_result.has_changes:
-            logger.info(
-                f"Job changes for {domain}: "
-                f"+{len(sync_result.new_jobs)} new, "
-                f"-{len(sync_result.removed_jobs)} removed, "
-                f"↻{len(sync_result.reactivated_jobs)} reactivated"
-            )
-        
-        return jobs
     
     def _choose_best_careers_url(self, sitemap_url: Optional[str], nav_url: Optional[str]) -> Optional[str]:
         """Choose the best careers URL between sitemap and navigation link.
@@ -533,7 +414,9 @@ class WebsiteSearcher(BaseSearcher):
             # Сохраняем сайт и career_url даже если вакансий сейчас нет,
             # чтобы отслеживать компанию при следующих сканированиях
             if self.use_cache and self._repository and careers_url:
-                await self._save_to_cache(domain, careers_url, jobs)
+                cache_mgr = self._get_cache_manager()
+                await cache_mgr.save_to_cache(domain, careers_url, jobs)
+                self.last_sync_result = cache_mgr.last_sync_result
 
             return jobs
             
@@ -582,64 +465,6 @@ class WebsiteSearcher(BaseSearcher):
             jobs.append(job)
 
         return jobs
-    
-    async def _save_to_cache(self, domain: str, careers_url: str, jobs: list[Job]) -> None:
-        """Save discovered career URL and jobs to cache.
-        
-        Сохраняет сайт и career URL даже если вакансий сейчас нет,
-        чтобы отслеживать компанию при следующих сканированиях.
-        
-        Args:
-            domain: Site domain
-            careers_url: Discovered career page URL
-            jobs: Found jobs (может быть пустым, если вакансий сейчас нет)
-        """
-        try:
-            # Get or create site
-            company_name = self._extract_company_name(f"https://{domain}")
-            site = await self._repository.get_or_create_site(domain, company_name)
-            
-            # Extract company info on first scan (when no description yet)
-            if not site.description:
-                try:
-                    main_page_url = f"https://{domain}"
-                    html = await self._fetch(main_page_url)
-                    if html:
-                        description = await self.llm.extract_company_info(html, main_page_url)
-                        if description:
-                            await self._repository.update_site_description(site.id, description)
-                            logger.info(f"Extracted company info for {domain}: {description[:50]}...")
-                except Exception as e:
-                    logger.warning(f"Failed to extract company info for {domain}: {e}")
-            
-            # Detect platform from URL
-            platform = detect_job_board_platform(careers_url)
-            
-            # Save career URL
-            await self._repository.add_career_url(site.id, careers_url, platform)
-            logger.debug(f"Cached career URL for {domain}: {careers_url}")
-            
-            # Sync jobs (this also handles new/removed tracking)
-            # Работает корректно даже с пустым списком - отметит все старые как removed
-            sync_result = await self._repository.sync_jobs(site.id, jobs)
-            self.last_sync_result = sync_result
-            
-            # Update site scan timestamp
-            await self._repository.update_site_scanned(site.id)
-            
-            if jobs:
-                logger.info(f"Cached {len(jobs)} jobs for {domain}")
-            else:
-                logger.info(f"Cached career URL for {domain} (no jobs currently)")
-            
-            if sync_result.has_changes:
-                logger.info(
-                    f"First scan for {domain}: "
-                    f"+{len(sync_result.new_jobs)} jobs added"
-                )
-                
-        except Exception as e:
-            logger.warning(f"Failed to save to cache: {e}")
 
     async def get_job_details(self, job_id: str) -> Optional[Job]:
         """Get job details (not implemented for website)."""
