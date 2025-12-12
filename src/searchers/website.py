@@ -437,7 +437,10 @@ class WebsiteSearcher(BaseSearcher):
                 return []
 
             # 7. Convert to Job models with translation + extract company info (PARALLEL)
-            jobs = await self._convert_jobs_data_with_company_info(jobs_data, url, careers_url, domain)
+            # Pass main page HTML to avoid re-fetching (saves ~6s)
+            jobs = await self._convert_jobs_data_with_company_info(
+                jobs_data, url, careers_url, domain, main_page_html=html
+            )
             
             # 9. Save to cache if enabled
             # Сохраняем сайт и career_url даже если вакансий сейчас нет,
@@ -459,7 +462,8 @@ class WebsiteSearcher(BaseSearcher):
         jobs_data: list[dict], 
         url: str, 
         careers_url: str,
-        domain: str
+        domain: str,
+        main_page_html: Optional[str] = None,
     ) -> list[Job]:
         """Convert raw job data to Job objects with translation + extract company info in parallel.
         
@@ -472,6 +476,7 @@ class WebsiteSearcher(BaseSearcher):
             url: Original URL
             careers_url: Career page URL (for fallback)
             domain: Domain for company info extraction
+            main_page_html: Pre-fetched HTML of main page (avoids re-fetch)
             
         Returns:
             List of Job objects
@@ -481,7 +486,7 @@ class WebsiteSearcher(BaseSearcher):
         if not jobs_data:
             # Still extract company info even if no jobs
             if self.use_cache and self._repository:
-                await self._extract_and_save_company_info(domain)
+                await self._extract_and_save_company_info(domain, html=main_page_html)
             return []
         
         self._update_status("Перевожу вакансии...")
@@ -493,7 +498,11 @@ class WebsiteSearcher(BaseSearcher):
         translate_task = self.llm.translate_job_titles(titles)
         
         # Task 2: Extract company info (if caching enabled and not yet extracted)
-        company_info_task = self._extract_and_save_company_info(domain) if self.use_cache and self._repository else None
+        # Pass pre-fetched HTML to avoid re-fetching main page
+        company_info_task = (
+            self._extract_and_save_company_info(domain, html=main_page_html) 
+            if self.use_cache and self._repository else None
+        )
         
         # Run in parallel
         if company_info_task:
@@ -520,10 +529,16 @@ class WebsiteSearcher(BaseSearcher):
 
         return jobs
 
-    async def _extract_and_save_company_info(self, domain: str) -> None:
+    async def _extract_and_save_company_info(
+        self, domain: str, html: Optional[str] = None
+    ) -> None:
         """Extract company info from main page and save to database.
         
         Skips if company already has description.
+        
+        Args:
+            domain: Company domain
+            html: Pre-fetched HTML of main page (avoids re-fetch if provided)
         """
         if not self._repository:
             return
@@ -534,9 +549,11 @@ class WebsiteSearcher(BaseSearcher):
             if site and site.description:
                 return  # Already has description
             
-            # Fetch main page and extract company info
+            # Use pre-fetched HTML or fetch main page
             main_page_url = f"https://{domain}"
-            html = await self._fetch(main_page_url)
+            if not html:
+                html = await self._fetch(main_page_url)
+            
             if html:
                 description = await self.llm.extract_company_info(html, main_page_url)
                 if description:

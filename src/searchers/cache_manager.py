@@ -145,19 +145,26 @@ class CacheManager:
             working_url.url if working_url else url
         )
         
-        # Translate and convert to Job objects
+        # Translate jobs and extract company info IN PARALLEL
+        import asyncio
+        
         self._update_status("Перевожу вакансии...")
-        jobs = await self._convert_jobs(
+        
+        # Task 1: Translate and convert to Job objects
+        convert_task = self._convert_jobs(
             unique_jobs_data, url, working_url.url if working_url else url
         )
+        
+        # Task 2: Extract company info if not yet available
+        company_info_task = self._maybe_extract_company_info(site, domain)
+        
+        # Run in parallel
+        jobs, _ = await asyncio.gather(convert_task, company_info_task)
         
         # Sync with database and track changes
         self._update_status("Синхронизирую с базой...")
         sync_result = await self._repository.sync_jobs(site.id, jobs)
         self.last_sync_result = sync_result
-        
-        # Extract company info if not yet available
-        await self._maybe_extract_company_info(site, domain)
         
         # Update site scan timestamp
         await self._repository.update_site_scanned(site.id)
@@ -233,13 +240,25 @@ class CacheManager:
             logger.warning(f"Failed to save to cache: {e}")
     
     async def _maybe_extract_company_info(self, site, domain: str) -> None:
-        """Extract company info if not yet available."""
+        """Extract company info if not yet available.
+        
+        Uses simple HTTP fetch (not browser) since main page usually doesn't need JS.
+        """
         if site.description:
             return
             
         try:
+            import aiohttp
             main_page_url = f"https://{domain}"
-            html = await self._fetch_html(main_page_url)
+            
+            # Use simple HTTP fetch (faster than browser for main page)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(main_page_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        html = await resp.text()
+                    else:
+                        html = None
+            
             if html:
                 description = await self._extract_company_info(html, main_page_url)
                 if description:
