@@ -64,6 +64,10 @@ class OpenRouterProvider(BaseLLMProvider):
 
     # Настройки для разных моделей
     MODEL_CONFIGS = {
+        "openai/gpt-4o-mini": {
+            "temperature": 0.0,
+            "max_tokens": 16384,
+        },
         "openai/gpt-oss-20b": {
             "temperature": 0.0,
             "max_tokens": 8192,
@@ -110,7 +114,7 @@ class OpenRouterProvider(BaseLLMProvider):
     def __init__(
         self,
         api_key: str,
-        model: str = "openai/gpt-oss-120b",
+        model: str = "openai/gpt-4o-mini",
         timeout: float = 300.0,
         provider: Optional[str] = None,
         provider_order: Optional[list[str]] = None,

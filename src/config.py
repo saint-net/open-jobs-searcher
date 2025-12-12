@@ -21,15 +21,16 @@ class Settings(BaseSettings):
 
     # LLM настройки
     llm_provider: str = Field(default="openrouter", description="LLM провайдер")
-    llm_model: str = Field(default="openai/gpt-oss-120b", description="Модель LLM")
+    llm_model: str = Field(default="openai/gpt-4o-mini", description="Модель LLM")
     ollama_url: str = Field(
         default="http://localhost:11434", description="URL Ollama сервера"
     )
 
     # OpenRouter provider routing
-    # Доступные провайдеры для gpt-oss-120b: chutes, siliconflow, novitaai, gmicloud, deepinfra, ncompass
+    # Для gpt-4o-mini OpenRouter автоматически выбирает лучших провайдеров
+    # Для других моделей можно указать конкретный провайдер
     openrouter_provider: str = Field(
-        default="mara", description="Конкретный провайдер OpenRouter (например: mara, chutes)"
+        default="", description="Конкретный провайдер OpenRouter (опционально)"
     )
     openrouter_allow_fallbacks: bool = Field(
         default=True, description="Разрешать fallback на другие провайдеры"

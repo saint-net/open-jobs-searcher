@@ -571,7 +571,7 @@ def website(
     # Определяем модель для отображения
     display_model = model
     if display_model is None:
-        display_model = "gpt-oss:20b" if provider == "ollama" else "openai/gpt-oss-120b"
+        display_model = "gpt-oss:20b" if provider == "ollama" else "openai/gpt-4o-mini"
     
     # Определяем бэкенд-провайдер для отображения (из CLI или из настроек)
     display_backend = openrouter_provider or (settings.openrouter_provider if provider == "openrouter" else None)
@@ -642,7 +642,7 @@ async def _search_website(
         if provider == "ollama":
             model = "gpt-oss:20b"
         else:
-            model = "openai/gpt-oss-120b"
+            model = "openai/gpt-4o-mini"
     
     try:
         # Передаём openrouter_provider если указан
@@ -768,7 +768,7 @@ def find_job_urls(
     
     display_model = model
     if display_model is None:
-        display_model = "gpt-oss:20b" if provider == "ollama" else "openai/gpt-oss-120b"
+        display_model = "gpt-oss:20b" if provider == "ollama" else "openai/gpt-4o-mini"
     
     # Определяем бэкенд-провайдер для отображения
     display_backend = openrouter_provider or (settings.openrouter_provider if provider == "openrouter" else None)
@@ -810,7 +810,7 @@ async def _find_job_urls(
         if provider == "ollama":
             model = "gpt-oss:20b"
         else:
-            model = "openai/gpt-oss-120b"
+            model = "openai/gpt-4o-mini"
     
     try:
         llm_kwargs = {"model": model}

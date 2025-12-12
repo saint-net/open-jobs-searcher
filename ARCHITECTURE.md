@@ -134,7 +134,7 @@ job_history (id, job_id, event, changed_at, details)
 - **OllamaProvider** (`ollama.py`) - локальный Ollama сервер
 - **OpenRouterProvider** (`openrouter.py`) - OpenRouter API с Provider Routing:
   - Поддержка 300+ моделей
-  - Дефолтная модель: `openai/gpt-oss-120b`
+  - Дефолтная модель: `openai/gpt-4o-mini`
   - Provider routing: выбор конкретного бэкенда (chutes, siliconflow, etc.)
   - Retry logic для transient errors
   - Configurable fallbacks

@@ -35,7 +35,7 @@ pip install -r requirements.txt
 
 ### Для поиска по сайтам (LLM)
 
-По умолчанию используется **OpenRouter** с моделью `openai/gpt-oss-120b`.
+По умолчанию используется **OpenRouter** с моделью `openai/gpt-4o-mini`.
 
 Создайте файл `.env` с API ключом:
 
@@ -49,13 +49,8 @@ OPENROUTER_PROVIDER=chutes
 
 #### Доступные OpenRouter провайдеры
 
-Для модели `openai/gpt-oss-120b` доступны следующие бэкенд-провайдеры:
-- `chutes` - ~97.6% uptime (по умолчанию)
-- `siliconflow` - ~97.7% uptime
-- `novitaai` - ~85.5% uptime
-- `gmicloud` - ~88.7% uptime
-- `deepinfra` - ~69.3% uptime
-- `ncompass` - ~77.2% uptime
+Для модели `openai/gpt-4o-mini` OpenRouter автоматически выбирает лучших провайдеров.
+Для альтернативных моделей (например `openai/gpt-oss-120b`) можно указать конкретный провайдер через `--openrouter-provider`.
 
 #### Альтернатива: Ollama (локально)
 
@@ -217,7 +212,7 @@ python main.py search "Python" --output results.csv --format csv
 |-------|----------|
 | `--browser, -b` | Использовать браузер Playwright (по умолчанию включен) |
 | `--provider, -p` | LLM провайдер: `openrouter` (по умолчанию), `ollama` |
-| `--model, -m` | Модель LLM (по умолчанию `openai/gpt-oss-120b` для openrouter, `gpt-oss:20b` для ollama) |
+| `--model, -m` | Модель LLM (по умолчанию `openai/gpt-4o-mini` для openrouter, `gpt-oss:20b` для ollama) |
 | `--openrouter-provider` | Бэкенд-провайдер OpenRouter: `chutes`, `siliconflow`, `novitaai`, `gmicloud`, `deepinfra` |
 | `--output, -o` | Путь для сохранения результатов |
 | `--format, -f` | Формат: `json` или `csv` |
@@ -333,7 +328,7 @@ open-jobs-searcher/
 
 | Провайдер | Статус | Модели |
 |-----------|--------|--------|
-| OpenRouter | ✅ По умолчанию | openai/gpt-oss-120b и [300+ других](https://openrouter.ai/models) |
+| OpenRouter | ✅ По умолчанию | openai/gpt-4o-mini и [300+ других](https://openrouter.ai/models) |
 | Ollama | ✅ Готов | gpt-oss:20b, llama3.2, mistral и др. |
 | OpenAI | 🔜 Скоро | gpt-4o-mini, gpt-4o |
 | Claude | 🔜 Скоро | claude-3-haiku, claude-3-sonnet |

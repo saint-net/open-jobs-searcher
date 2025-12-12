@@ -52,7 +52,7 @@
 - Промпты хранятся в `src/llm/prompts.py`
 - Структурированный вывод через JSON schema
 - Обработка rate limits и retry логика в провайдерах
-- Дефолтная модель: openai/gpt-oss-120b (OpenRouter)
+- Дефолтная модель: openai/gpt-4o-mini (OpenRouter)
 - Composition pattern: LLMJobExtractor, LLMUrlDiscovery
 - Утилиты в `html_utils.py`: clean_html, extract_json, extract_url
 
