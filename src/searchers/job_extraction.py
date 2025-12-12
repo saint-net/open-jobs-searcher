@@ -247,23 +247,32 @@ class JobExtractor:
                     jobs_data = self.job_board_parsers.parse(html, final_url, external_platform)
                 # No pagination for external platforms
             else:
-                # Try high-accuracy strategies first (Schema.org, PDF links)
+                # 1. Try Schema.org first (100% accuracy when available)
                 schema_strategy = SchemaOrgStrategy()
                 schema_candidates = schema_strategy.extract(html, final_url)
                 if schema_candidates:
                     jobs_data = [c.to_dict() for c in schema_candidates]
                     logger.debug(f"Schema.org extracted {len(jobs_data)} jobs")
                 else:
+                    # 2. Collect PDF links as supplement (strategy logs internally)
                     pdf_strategy = PdfLinkStrategy()
                     pdf_candidates = pdf_strategy.extract(html, final_url)
-                    if pdf_candidates:
+                    
+                    # 3. LLM as main extraction method
+                    result = await self.llm.extract_jobs_with_pagination(html, final_url)
+                    llm_jobs = result.get("jobs", [])
+                    next_page_url = result.get("next_page_url")
+                    
+                    # 4. Merge LLM + PDF results (deduplication happens in _deduplicate_jobs)
+                    if llm_jobs:
+                        pdf_jobs = [c.to_dict() for c in pdf_candidates] if pdf_candidates else []
+                        if pdf_jobs:
+                            logger.debug(f"Merging {len(llm_jobs)} LLM + {len(pdf_jobs)} PDF jobs")
+                        jobs_data = llm_jobs + pdf_jobs
+                    elif pdf_candidates:
+                        # Fallback: PDF only if LLM found nothing
                         jobs_data = [c.to_dict() for c in pdf_candidates]
-                        logger.debug(f"PdfLinkStrategy extracted {len(jobs_data)} jobs")
-                    else:
-                        # Use LLM extraction with pagination support
-                        result = await self.llm.extract_jobs_with_pagination(html, final_url)
-                        jobs_data = result.get("jobs", [])
-                        next_page_url = result.get("next_page_url")
+                        logger.debug(f"LLM found nothing, using {len(jobs_data)} PDF candidates")
             
             logger.debug(f"Extracted {len(jobs_data)} jobs from {final_url}")
             return jobs_data, next_page_url

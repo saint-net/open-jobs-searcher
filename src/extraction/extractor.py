@@ -46,7 +46,7 @@ class HybridJobExtractor:
     
     async def extract(self, html: str, url: str, page: Any = None) -> list[dict]:
         """
-        Extract jobs: Schema.org first, then LLM.
+        Extract jobs: Schema.org first, then LLM + PDF.
         
         Args:
             html: HTML content of the careers page
@@ -66,25 +66,40 @@ class HybridJobExtractor:
         except Exception as e:
             logger.warning(f"SchemaOrgStrategy failed: {e}")
         
-        # 2. Try PDF link extraction (job postings as PDF flyers)
+        # 2. Collect PDF links as supplement (strategy logs internally)
+        pdf_candidates = []
         try:
             pdf_candidates = self.pdf_link_strategy.extract(html, url)
-            if pdf_candidates:
-                logger.debug(f"PdfLinkStrategy found {len(pdf_candidates)} jobs")
-                return self._finalize(pdf_candidates)
-            logger.debug("PdfLinkStrategy found 0 jobs")
         except Exception as e:
             logger.warning(f"PdfLinkStrategy failed: {e}")
         
-        # 3. No structured data -> use LLM as main extraction method
+        # 3. LLM as main extraction method
         llm_jobs = await self._llm_extract(html, url)
         if llm_jobs:
             llm_candidates = self._convert_llm_jobs(llm_jobs)
-            return self._finalize(llm_candidates)
+            # Merge LLM + PDF results, deduplicate
+            all_candidates = self._deduplicate(llm_candidates + pdf_candidates)
+            logger.debug(f"Combined: {len(llm_candidates)} LLM + {len(pdf_candidates)} PDF = {len(all_candidates)} unique")
+            return self._finalize(all_candidates)
+        
+        # 4. Fallback: PDF only if LLM found nothing
+        if pdf_candidates:
+            logger.debug(f"LLM found nothing, using {len(pdf_candidates)} PDF candidates")
+            return self._finalize(pdf_candidates)
         
         # No jobs found
-        logger.debug("No jobs found via Schema.org or LLM")
+        logger.debug("No jobs found via Schema.org, LLM, or PDF")
         return []
+    
+    def _deduplicate(self, candidates: list[JobCandidate]) -> list[JobCandidate]:
+        """Deduplicate candidates by normalized title."""
+        seen = set()
+        unique = []
+        for c in candidates:
+            if c.normalized_title not in seen:
+                seen.add(c.normalized_title)
+                unique.append(c)
+        return unique
     
     # Keep for backward compatibility
     async def extract_with_browser(self, html: str, url: str, page: Any) -> list[dict]:
