@@ -2,19 +2,25 @@
 
 import logging
 import re
-from typing import Callable, Awaitable, Optional, Any
+from typing import Callable, Awaitable, Optional, Any, TypeVar
 
 from bs4 import BeautifulSoup
+from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, retry_if_result, before_sleep_log
 
 from src.constants import MAX_LLM_RETRIES, MIN_JOB_SECTION_SIZE, MAX_JOB_SECTION_SIZE
-from src.models import JobDict, JobExtractionResult
+from src.models import JobDict, JobExtractionResult, JobExtractionSchema
 
 logger = logging.getLogger(__name__)
 
+# Generic type for structured output
+T = TypeVar("T", bound=BaseModel)
 
-def _is_empty_result(result: JobExtractionResult) -> bool:
+
+def _is_empty_result(result: JobExtractionResult | JobExtractionSchema) -> bool:
     """Check if extraction result has no jobs (trigger retry)."""
+    if isinstance(result, JobExtractionSchema):
+        return not result.jobs
     return not result.get("jobs")
 
 
@@ -74,6 +80,7 @@ class LLMJobExtractor:
         clean_html_fn: Callable[[str], str],
         extract_json_fn: Callable[[str], list | dict],
         complete_json_fn: Callable[[str], Awaitable[dict | list]] = None,
+        complete_structured_fn: Callable[[str, type[T]], Awaitable[T]] = None,
         html_to_markdown_fn: Callable[[str], str] = None,
     ):
         """
@@ -83,13 +90,15 @@ class LLMJobExtractor:
             complete_fn: Async function to call LLM (prompt -> response)
             clean_html_fn: Function to clean HTML (fallback)
             extract_json_fn: Function to extract JSON from LLM response (fallback)
-            complete_json_fn: Async function for structured JSON output (preferred)
+            complete_json_fn: Async function for structured JSON output (legacy)
+            complete_structured_fn: Async function for Pydantic schema output (preferred)
             html_to_markdown_fn: Function to convert HTML to markdown (preferred, ~3-5x smaller)
         """
         self._complete = complete_fn
         self._clean_html = clean_html_fn
         self._extract_json = extract_json_fn
         self._complete_json = complete_json_fn
+        self._complete_structured = complete_structured_fn
         self._html_to_markdown = html_to_markdown_fn
     
     async def extract_jobs(self, html: str, url: str, page: Any = None) -> list[JobDict]:
@@ -187,7 +196,26 @@ class LLMJobExtractor:
         """Call LLM and parse job extraction response. Retries on empty result."""
         logger.debug("Calling LLM for job extraction...")
         
-        # Use structured output if available (preferred)
+        # Priority 1: Use structured output with Pydantic schema (best)
+        if self._complete_structured:
+            try:
+                result = await self._complete_structured(prompt, JobExtractionSchema)
+                
+                if result.jobs:
+                    logger.debug(f"LLM extracted {len(result.jobs)} jobs (structured)")
+                    # Convert Pydantic models to dicts
+                    return {
+                        "jobs": [job.model_dump() for job in result.jobs],
+                        "next_page_url": result.next_page_url
+                    }
+                else:
+                    logger.debug("LLM structured response returned no jobs")
+                    return {"jobs": [], "next_page_url": None}
+            except Exception as e:
+                logger.warning(f"Structured output failed, falling back to json_object: {e}")
+                # Fall through to legacy methods
+        
+        # Priority 2: Use json_object mode (legacy)
         if self._complete_json:
             result = await self._complete_json(prompt)
             
@@ -195,7 +223,7 @@ class LLMJobExtractor:
             if not result or (isinstance(result, dict) and not result.get("jobs")):
                 logger.debug("LLM JSON response returned no jobs")
         else:
-            # Fallback: complete() + extract_json()
+            # Priority 3: Fallback to complete() + extract_json()
             response = await self._complete(prompt)
             result = self._extract_json(response)
             

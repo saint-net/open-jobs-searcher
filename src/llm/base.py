@@ -3,7 +3,9 @@
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, TypeVar
+
+from pydantic import BaseModel
 
 from src.models import JobDict, JobExtractionResult
 from .html_utils import clean_html, extract_url, extract_json, html_to_markdown
@@ -12,6 +14,9 @@ if TYPE_CHECKING:
     from .cache import LLMCache
 
 logger = logging.getLogger(__name__)
+
+# Generic type for structured output
+T = TypeVar("T", bound=BaseModel)
 
 
 # Pre-compiled translation patterns for German → English job titles
@@ -80,6 +85,7 @@ class BaseLLMProvider(ABC):
                 clean_html_fn=clean_html,
                 extract_json_fn=extract_json,
                 complete_json_fn=self.complete_json,
+                complete_structured_fn=self.complete_structured,
                 html_to_markdown_fn=html_to_markdown,
             )
         return self._job_extractor
@@ -138,6 +144,40 @@ class BaseLLMProvider(ABC):
         response = await self.complete(prompt, system)
         return extract_json(response)
 
+    async def complete_structured(
+        self, 
+        prompt: str, 
+        schema: type[T],
+        system: Optional[str] = None
+    ) -> T:
+        """
+        Генерация ответа от LLM с гарантированным соответствием Pydantic схеме.
+
+        Использует response_format={"type": "json_schema"} для строгой типизации.
+        Провайдеры должны переопределить для native поддержки.
+
+        Args:
+            prompt: Пользовательский промпт
+            schema: Pydantic модель, определяющая структуру ответа
+            system: Системный промпт (опционально)
+
+        Returns:
+            Инстанс Pydantic модели с валидированными данными
+        """
+        # Дефолтная реализация — fallback на complete_json() + Pydantic validation
+        # Провайдеры с поддержкой json_schema должны переопределить
+        response = await self.complete_json(prompt, system)
+        
+        # Try to validate response with Pydantic
+        if isinstance(response, dict):
+            return schema.model_validate(response)
+        elif isinstance(response, list):
+            # If schema expects a wrapper, try to wrap
+            return schema.model_validate({"items": response})
+        
+        # Return empty instance as fallback
+        return schema()
+
     async def find_careers_url(
         self, html: str, base_url: str, sitemap_urls: list[str] = None
     ) -> Optional[str]:
@@ -159,6 +199,7 @@ class BaseLLMProvider(ABC):
     async def translate_job_titles(self, titles: list[str]) -> list[str]:
         """Translate job titles to English."""
         from .prompts import TRANSLATE_JOB_TITLES_PROMPT
+        from src.models import TranslationSchema
 
         if not titles:
             return []
@@ -180,39 +221,64 @@ class BaseLLMProvider(ABC):
         
         prompt = TRANSLATE_JOB_TITLES_PROMPT.format(titles=titles_text)
 
-        # Use structured output for guaranteed valid JSON
+        # Try structured output first (guaranteed schema)
+        try:
+            result = await self.complete_structured(prompt, TranslationSchema)
+            translated = result.translations
+            
+            if len(translated) == len(titles):
+                # Validate each translation
+                valid_translations = []
+                for t in translated:
+                    if '\xa0?' in t or '\\xa0' in t or t == '...' or 'error' in t.lower():
+                        break
+                    valid_translations.append(t.strip())
+                else:
+                    # All valid - cache and return
+                    if self._cache:
+                        from .cache import CacheNamespace, estimate_tokens
+                        await self._cache.set(
+                            CacheNamespace.TRANSLATION, 
+                            titles_text, 
+                            valid_translations,
+                            tokens_estimate=estimate_tokens(titles_text)
+                        )
+                    return valid_translations
+                
+                logger.warning("Translation response contained invalid data, using fallback")
+            else:
+                logger.warning(f"Translation count mismatch: expected {len(titles)}, got {len(translated)}")
+                
+        except Exception as e:
+            logger.warning(f"Structured translation failed: {e}, falling back to legacy")
+
+        # Fallback to legacy complete_json
         translated = await self.complete_json(prompt)
 
         # Handle both array and object responses
-        # OpenAI's json_object mode returns {"translations": [...]} instead of [...]
         if isinstance(translated, dict):
-            # Try common keys for array of translations
             for key in ("translations", "titles", "translated_titles", "result"):
                 if key in translated and isinstance(translated[key], list):
                     translated = translated[key]
                     break
             else:
-                # If dict has no known keys, check if it's a single-key dict with a list
                 values = list(translated.values())
                 if len(values) == 1 and isinstance(values[0], list):
                     translated = values[0]
 
         if isinstance(translated, list) and len(translated) == len(titles):
-            # Validate each translation is a proper string
             result = []
             valid = True
             for t in translated:
                 if not isinstance(t, str):
                     valid = False
                     break
-                # Check for garbage responses (encoding issues, error messages)
                 if '\xa0?' in t or '\\xa0' in t or t == '...' or 'error' in t.lower():
                     valid = False
                     break
                 result.append(t.strip())
             
             if valid and len(result) == len(titles):
-                # Cache successful translation
                 if self._cache:
                     from .cache import CacheNamespace, estimate_tokens
                     await self._cache.set(
@@ -221,17 +287,12 @@ class BaseLLMProvider(ABC):
                         result,
                         tokens_estimate=estimate_tokens(titles_text)
                     )
-                
                 return result
             
             logger.warning("Translation response contained invalid data, using fallback")
         
         # Fallback: use dictionary-based translation for common German words
         logger.debug("Using dictionary fallback for translation")
-        return self._translate_with_dictionary(titles)
-        
-        logger.warning("Translation failed, using dictionary fallback")
-        logger.debug(f"Expected {len(titles)} titles, got: {type(translated).__name__} = {str(translated)[:100]}...")
         return self._translate_with_dictionary(titles)
     
     def _translate_with_dictionary(self, titles: list[str]) -> list[str]:
@@ -245,8 +306,6 @@ class BaseLLMProvider(ABC):
             for pattern, replacement in TRANSLATION_RULES:
                 translated = pattern.sub(replacement, translated)
             result.append(translated)
-        return result
-        
         return result
 
     def _titles_look_english(self, titles: list[str]) -> bool:

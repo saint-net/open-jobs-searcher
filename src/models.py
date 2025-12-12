@@ -30,6 +30,78 @@ class JobExtractionResult(TypedDict):
     next_page_url: Optional[str]
 
 
+# ==================== Structured Output Models ====================
+# These models are used with OpenAI's json_schema response_format
+# for guaranteed schema compliance.
+#
+# OpenAI strict mode requires:
+# 1. additionalProperties: false
+# 2. ALL properties in required array (even those with defaults)
+
+
+class ExtractedJob(BaseModel):
+    """Single job listing extracted by LLM."""
+    title: str = Field(description="Job title, keep (m/w/d) notation")
+    location: str = Field(description="City/region or Remote or Unknown")
+    url: str = Field(description="Full URL to job details or empty string")
+    department: Optional[str] = Field(description="Department if mentioned or null")
+    company: Optional[str] = Field(description="Company name if shown on job card or null")
+
+    model_config = {
+        "extra": "forbid",
+    }
+    
+    @classmethod
+    def model_json_schema(cls, **kwargs):
+        """Override to make all properties required for OpenAI strict mode."""
+        schema = super().model_json_schema(**kwargs)
+        # Make all properties required
+        if "properties" in schema:
+            schema["required"] = list(schema["properties"].keys())
+        return schema
+
+
+class JobExtractionSchema(BaseModel):
+    """Schema for LLM job extraction response."""
+    jobs: list[ExtractedJob] = Field(description="List of extracted jobs")
+    next_page_url: Optional[str] = Field(description="URL of next page if pagination exists or null")
+
+    model_config = {
+        "extra": "forbid",
+    }
+    
+    @classmethod
+    def model_json_schema(cls, **kwargs):
+        """Override to make all properties required for OpenAI strict mode."""
+        schema = super().model_json_schema(**kwargs)
+        # Make all properties required at root level
+        if "properties" in schema:
+            schema["required"] = list(schema["properties"].keys())
+        # Also fix nested ExtractedJob schema
+        if "$defs" in schema and "ExtractedJob" in schema["$defs"]:
+            nested = schema["$defs"]["ExtractedJob"]
+            if "properties" in nested:
+                nested["required"] = list(nested["properties"].keys())
+        return schema
+
+
+class TranslationSchema(BaseModel):
+    """Schema for LLM translation response."""
+    translations: list[str] = Field(description="Translated titles in same order as input")
+
+    model_config = {
+        "extra": "forbid",
+    }
+    
+    @classmethod
+    def model_json_schema(cls, **kwargs):
+        """Override to make all properties required for OpenAI strict mode."""
+        schema = super().model_json_schema(**kwargs)
+        if "properties" in schema:
+            schema["required"] = list(schema["properties"].keys())
+        return schema
+
+
 class Job(BaseModel):
     """Модель вакансии с валидацией через Pydantic."""
 

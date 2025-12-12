@@ -4,9 +4,13 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TypeVar
 
 import httpx
+from pydantic import BaseModel
+
+# Generic type for structured output
+T = TypeVar("T", bound=BaseModel)
 from rich.console import Console
 from tenacity import (
     retry,
@@ -379,6 +383,93 @@ class OpenRouterProvider(BaseLLMProvider):
                     return extract_json(content)
             
             return {}
+            
+        except OpenRouterRetryableError:
+            raise  # Let tenacity handle it
+
+    # Models that support json_schema (structured output)
+    STRUCTURED_OUTPUT_MODELS = {
+        "openai/gpt-4o",
+        "openai/gpt-4o-mini",
+        "openai/gpt-4o-2024-08-06",
+        "openai/gpt-4o-mini-2024-07-18",
+    }
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=2, max=16),
+        retry=retry_if_exception_type(OpenRouterRetryableError),
+        before_sleep=lambda rs: OpenRouterProvider._log_retry(rs.args[0], rs),
+        reraise=True,
+    )
+    async def complete_structured(
+        self, 
+        prompt: str, 
+        schema: type[T],
+        system: Optional[str] = None
+    ) -> T:
+        """
+        Generate response matching Pydantic schema via OpenRouter API.
+        
+        Uses response_format={"type": "json_schema"} for guaranteed schema compliance.
+        Falls back to json_object mode for models that don't support json_schema.
+        
+        Args:
+            prompt: User prompt
+            schema: Pydantic model class defining the response structure
+            system: System prompt (optional)
+            
+        Returns:
+            Parsed and validated Pydantic model instance
+        """
+        messages = self._build_messages(prompt, system)
+        
+        # Check if model supports json_schema
+        use_json_schema = self.model in self.STRUCTURED_OUTPUT_MODELS
+        
+        if use_json_schema:
+            # Use strict json_schema mode
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema.__name__,
+                    "strict": True,
+                    "schema": schema.model_json_schema()
+                }
+            }
+            logger.debug(f"Using json_schema mode for {schema.__name__}")
+        else:
+            # Fallback to json_object mode
+            response_format = {"type": "json_object"}
+            logger.debug(f"Model {self.model} doesn't support json_schema, using json_object fallback")
+        
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.config["temperature"],
+            "max_tokens": self.config["max_tokens"],
+            "response_format": response_format,
+        }
+        
+        provider_config = self._build_provider_config()
+        if provider_config:
+            payload["provider"] = provider_config
+
+        start_time = time.perf_counter()
+        
+        try:
+            data = await self._make_request(payload)
+            elapsed = time.perf_counter() - start_time
+            
+            self._track_usage(data, elapsed, json_mode=True)
+            
+            content = self._extract_content(data)
+            if content:
+                # Parse and validate with Pydantic
+                return schema.model_validate_json(content)
+            
+            # Return empty instance if no content
+            return schema()
             
         except OpenRouterRetryableError:
             raise  # Let tenacity handle it
