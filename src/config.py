@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # OpenRouter provider routing
     # Доступные провайдеры для gpt-oss-120b: chutes, siliconflow, novitaai, gmicloud, deepinfra, ncompass
     openrouter_provider: str = Field(
-        default="chutes", description="Конкретный провайдер OpenRouter (например: chutes)"
+        default="mara", description="Конкретный провайдер OpenRouter (например: mara, chutes)"
     )
     openrouter_allow_fallbacks: bool = Field(
         default=True, description="Разрешать fallback на другие провайдеры"

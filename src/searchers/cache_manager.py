@@ -42,6 +42,7 @@ class CacheManager:
         fetch_html: Callable[[str], Awaitable[Optional[str]]],
         extract_company_info: Callable[[str, str], Awaitable[Optional[str]]],
         extract_company_name: Callable[[str], str],
+        status_callback: Optional[Callable[[str], None]] = None,
     ):
         """
         Initialize cache manager.
@@ -53,6 +54,7 @@ class CacheManager:
             fetch_html: Async function to fetch HTML from URL
             extract_company_info: Async function to extract company info via LLM
             extract_company_name: Function to extract company name from URL
+            status_callback: Optional callback for status updates
         """
         self._repository = repository
         self._extract_jobs = extract_jobs
@@ -60,9 +62,15 @@ class CacheManager:
         self._fetch_html = fetch_html
         self._extract_company_info = extract_company_info
         self._extract_company_name = extract_company_name
+        self._status_callback = status_callback
         
         # Last sync result (for reporting new/removed jobs)
         self.last_sync_result: Optional[SyncResult] = None
+    
+    def _update_status(self, message: str) -> None:
+        """Update status if callback is set."""
+        if self._status_callback:
+            self._status_callback(message)
     
     async def search_with_cache(self, url: str, domain: str) -> Optional[list[Job]]:
         """Try to search using cached career URLs.
@@ -94,6 +102,7 @@ class CacheManager:
         for career_url in career_urls:
             try:
                 logger.debug(f"Trying cached URL: {career_url.url}")
+                self._update_status("Загружаю страницу вакансий...")
                 jobs_data = await self._extract_jobs(career_url.url, url)
                 
                 if jobs_data:
@@ -137,11 +146,13 @@ class CacheManager:
         )
         
         # Translate and convert to Job objects
+        self._update_status("Перевожу вакансии...")
         jobs = await self._convert_jobs(
             unique_jobs_data, url, working_url.url if working_url else url
         )
         
         # Sync with database and track changes
+        self._update_status("Синхронизирую с базой...")
         sync_result = await self._repository.sync_jobs(site.id, jobs)
         self.last_sync_result = sync_result
         

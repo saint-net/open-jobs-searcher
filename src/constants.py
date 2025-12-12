@@ -17,7 +17,7 @@ MAX_SITEMAP_URLS = 300  # Maximum URLs to fetch from sitemap
 
 MAX_LLM_RETRIES = 3  # Maximum retries for LLM calls
 MAX_URLS_FOR_LLM = 500  # Maximum URLs to send to LLM for analysis
-LLM_TIMEOUT = 300.0  # Default timeout for LLM calls (seconds)
+LLM_TIMEOUT = 60.0  # Default timeout for LLM calls (seconds)
 
 
 # =============================================================================

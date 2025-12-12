@@ -70,6 +70,9 @@ class WebsiteSearcher(BaseSearcher):
         # Database repository for caching
         self._repository = JobRepository() if use_cache else None
         
+        # Status callback for progress updates
+        self._status_callback = None
+        
         # Set up LLM cache if caching is enabled
         if use_cache and self._repository:
             self._llm_cache = LLMCache(self._repository)
@@ -104,8 +107,22 @@ class WebsiteSearcher(BaseSearcher):
                 fetch_html=self._fetch,
                 extract_company_info=self.llm.extract_company_info,
                 extract_company_name=self._extract_company_name,
+                status_callback=self._status_callback,
             )
         return self._cache_manager
+
+    def set_status_callback(self, callback) -> None:
+        """Set callback for status updates.
+        
+        Args:
+            callback: Function that takes a status message string
+        """
+        self._status_callback = callback
+    
+    def _update_status(self, message: str) -> None:
+        """Update status if callback is set."""
+        if self._status_callback:
+            self._status_callback(message)
 
     async def search(
         self,
@@ -163,6 +180,7 @@ class WebsiteSearcher(BaseSearcher):
             
             # Try to use cached career URLs first
             if self.use_cache and self._repository:
+                self._update_status("Проверяю кэш URL...")
                 cache_mgr = self._get_cache_manager()
                 jobs = await cache_mgr.search_with_cache(url, domain)
                 if jobs is not None:  # None means cache miss or all URLs failed
@@ -252,11 +270,13 @@ class WebsiteSearcher(BaseSearcher):
 
         try:
             # 1. Load main page and sitemap URLs for LLM analysis
+            self._update_status("Загружаю главную страницу...")
             html = await self._fetch(url)
             sitemap_urls = await self.url_discovery.fetch_all_sitemap_urls(url)
             
             # 2. LLM analyzes HTML + sitemap to find careers URL
             if html:
+                self._update_status("Ищу страницу вакансий (LLM)...")
                 logger.info("Using LLM to find careers/jobs URL (HTML + sitemap)")
                 careers_url = await self.llm.find_careers_url(html, url, sitemap_urls)
                 
@@ -287,6 +307,7 @@ class WebsiteSearcher(BaseSearcher):
             careers_html = None
             
             for variant_url in self.url_discovery.generate_url_variants(careers_url):
+                self._update_status(f"Загружаю страницу вакансий...")
                 # Always use browser with page object for accessibility tree
                 final_url = variant_url
                 already_on_job_board = detect_job_board_platform(variant_url) is not None
@@ -368,6 +389,7 @@ class WebsiteSearcher(BaseSearcher):
                     
                     # Use LLM extraction with pagination support
                     if not jobs_data:
+                        self._update_status("Извлекаю вакансии (LLM)...")
                         # Close page objects before pagination loop (we'll open new ones per page)
                         if page_obj:
                             try:
@@ -449,6 +471,8 @@ class WebsiteSearcher(BaseSearcher):
         """
         if not jobs_data:
             return []
+        
+        self._update_status("Перевожу вакансии...")
         
         # Translate job titles to English
         titles = [job_data.get("title", "Unknown Position") for job_data in jobs_data]

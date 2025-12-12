@@ -96,14 +96,15 @@ class OpenRouterProvider(BaseLLMProvider):
     ]
     
     # Доступные провайдеры OpenRouter для gpt-oss-120b
-    # Список slug-ов провайдеров: https://openrouter.ai/openai/gpt-oss-120b (вкладка Providers)
+    # Список slug-ов провайдеров: https://openrouter.ai/openai/gpt-oss-120b/providers
     AVAILABLE_PROVIDERS = [
-        "chutes",       # Uptime ~97.6%
-        "siliconflow",  # Uptime ~97.7%
-        "novitaai",     # Uptime ~85.5%
-        "gmicloud",     # Uptime ~88.7%
-        "deepinfra",    # Uptime ~69.3%
-        "ncompass",     # Uptime ~77.2%
+        "mara",         # High throughput
+        "chutes",
+        "siliconflow",
+        "novitaai",
+        "gmicloud",
+        "deepinfra",
+        "ncompass",
     ]
 
     def __init__(
@@ -214,6 +215,8 @@ class OpenRouterProvider(BaseLLMProvider):
             RuntimeError: On permanent errors
         """
         headers = self._build_headers()
+        provider_info = payload.get("provider", {}).get("order", ["default"])[0] if payload.get("provider") else "default"
+        logger.debug(f"Starting OpenRouter request to {self.model} via {provider_info}...")
         
         try:
             response = await self.client.post(
@@ -221,6 +224,7 @@ class OpenRouterProvider(BaseLLMProvider):
                 json=payload,
                 headers=headers,
             )
+            logger.debug(f"OpenRouter response received: HTTP {response.status_code}")
             response.raise_for_status()
             data = response.json()
             

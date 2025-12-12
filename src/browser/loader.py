@@ -125,7 +125,7 @@ class BrowserLoader:
             await self._playwright.stop()
             self._playwright = None
 
-    async def _scroll_and_wait_for_content(self, page: Page, max_scrolls: int = 15) -> None:
+    async def _scroll_and_wait_for_content(self, page: Page, max_scrolls: int = 8) -> None:
         """Scroll page to trigger lazy-loaded content (e.g., external job widgets).
         
         Many sites embed job listings via JS widgets (join.com, personio, etc.)
@@ -134,17 +134,19 @@ class BrowserLoader:
         
         Args:
             page: Playwright Page object
-            max_scrolls: Number of scroll increments
+            max_scrolls: Number of scroll increments (reduced from 15 for speed)
         """
         try:
             # Trigger user interaction events to bypass lazy loading checks
-            # Some sites require mouse/keyboard activity before loading content
             await page.mouse.move(100, 100)
-            await page.mouse.move(300, 300)
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(200)
             
-            # Get initial article count to detect when new content loads
-            initial_count = await page.evaluate("document.querySelectorAll('article').length")
+            # Count elements that might contain job listings (not just article)
+            initial_count = await page.evaluate(
+                "document.querySelectorAll('article, .job, .vacancy, .position, "
+                "[class*=\"job\"], [class*=\"career\"], [class*=\"opening\"], "
+                "li[class], tr[class]').length"
+            )
             last_count = initial_count
             no_change_count = 0
             
@@ -154,26 +156,26 @@ class BrowserLoader:
             
             # Scroll down incrementally to trigger lazy loading
             for i in range(max_scrolls):
-                # Scroll by viewport height using wheel event (more realistic)
+                # Scroll by viewport height
                 await page.mouse.wheel(0, scroll_step)
                 
-                # Move mouse to simulate user activity (triggers intersection observers)
-                y_pos = min(200 + i * 100, 600)
-                await page.mouse.move(400, y_pos)
+                # Shorter wait - 500ms is enough for most lazy loading
+                await page.wait_for_timeout(500)
                 
-                # Wait for network activity and rendering
-                await page.wait_for_timeout(1500)
-                
-                # Wait for network to settle after scroll
+                # Quick network check (1.5s timeout, not 3s)
                 try:
-                    await page.wait_for_load_state("networkidle", timeout=3000)
+                    await page.wait_for_load_state("networkidle", timeout=1500)
                 except Exception:
                     pass
                 
-                # Check if new articles appeared
-                current_count = await page.evaluate("document.querySelectorAll('article').length")
+                # Check if new content appeared
+                current_count = await page.evaluate(
+                    "document.querySelectorAll('article, .job, .vacancy, .position, "
+                    "[class*=\"job\"], [class*=\"career\"], [class*=\"opening\"], "
+                    "li[class], tr[class]').length"
+                )
                 if current_count > last_count:
-                    logger.debug(f"Scroll {i+1}: articles {last_count} -> {current_count}")
+                    logger.debug(f"Scroll {i+1}: elements {last_count} -> {current_count}")
                     last_count = current_count
                     no_change_count = 0
                 else:
@@ -184,32 +186,34 @@ class BrowserLoader:
                     "(window.innerHeight + window.scrollY) >= document.body.scrollHeight - 100"
                 )
                 
-                # Stop if at bottom and no new content for 3 scrolls
-                if at_bottom and no_change_count >= 3:
-                    logger.debug(f"Reached bottom, no new content. Total articles: {current_count}")
+                # Stop early: at bottom OR no changes for 2 scrolls (was 3)
+                if at_bottom or no_change_count >= 2:
+                    if at_bottom:
+                        logger.debug(f"Reached bottom. Total elements: {current_count}")
                     break
             
-            # Final scroll to absolute bottom with wheel
-            await page.mouse.wheel(0, 2000)
-            await page.wait_for_timeout(2000)
+            # Final scroll to bottom (shorter wait)
+            await page.mouse.wheel(0, 1500)
+            await page.wait_for_timeout(800)
             
-            # Wait for any remaining network requests
+            # Quick network settle
             try:
-                await page.wait_for_load_state("networkidle", timeout=5000)
+                await page.wait_for_load_state("networkidle", timeout=2000)
             except Exception:
                 pass
             
-            # Additional wait for JS rendering
-            await page.wait_for_timeout(1500)
-            
-            # Log final count
-            final_count = await page.evaluate("document.querySelectorAll('article').length")
+            # Log if content changed
+            final_count = await page.evaluate(
+                "document.querySelectorAll('article, .job, .vacancy, .position, "
+                "[class*=\"job\"], [class*=\"career\"], [class*=\"opening\"], "
+                "li[class], tr[class]').length"
+            )
             if final_count != initial_count:
-                logger.debug(f"Lazy loading complete: {initial_count} -> {final_count} articles")
+                logger.debug(f"Lazy loading complete: {initial_count} -> {final_count} elements")
             
-            # Scroll back to top for consistent HTML extraction
+            # Scroll back to top
             await page.evaluate("window.scrollTo(0, 0)")
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(300)
                 
         except Exception as e:
             logger.debug(f"Scroll/wait failed (continuing): {e}")
@@ -400,12 +404,12 @@ class BrowserLoader:
             # Обрабатываем cookie consent
             for _ in range(3):
                 if await handle_cookie_consent(page):
-                    await page.wait_for_timeout(1000)
+                    await page.wait_for_timeout(500)
                     break
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(300)
             
-            # Scroll to trigger lazy-loaded content (external job widgets)
-            await self._scroll_and_wait_for_content(page)
+            # NOTE: Don't scroll here - we'll scroll once after final navigation
+            # This avoids double scrolling which was causing 80+ second delays
             
             final_url = url
             

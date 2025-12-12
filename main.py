@@ -656,8 +656,13 @@ async def _search_website(
 
     async with WebsiteSearcher(llm, use_browser=use_browser, use_cache=use_cache, headless=headless) as searcher:
         try:
-            status_msg = "[bold green]Анализирую сайт через браузер..." if use_browser else "[bold green]Анализирую сайт..."
-            with console.status(status_msg):
+            with console.status("") as status:
+                def update_status(msg: str):
+                    status.update(f"[bold green]{msg}")
+                
+                base_msg = "Анализирую сайт через браузер" if use_browser else "Анализирую сайт"
+                update_status(f"{base_msg}...")
+                searcher.set_status_callback(update_status)
                 jobs = await searcher.search(keywords=url)
             
             if jobs:
