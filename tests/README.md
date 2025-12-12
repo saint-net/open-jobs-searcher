@@ -6,16 +6,19 @@
 
 | Тип | Файл | Описание |
 |-----|------|----------|
-| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (103 теста) |
-| Integration | `test_integration_*.py` | Проверка парсинга с реальным HTML (78 тестов) |
-| Job Boards | `test_job_board_parsers.py` | Тесты парсеров платформ (77 тестов) |
-| Filters | `test_website_filters.py` | Фильтрация вакансий (21 тест) |
+| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций |
+| Integration | `test_integration_*.py` | Проверка парсинга с реальным HTML |
+| Job Boards | `test_job_board_parsers.py` | Тесты парсеров платформ |
+| Filters | `test_website_filters.py` | Фильтрация вакансий |
 | Cache | `test_cache_manager.py` | CacheManager и дедупликация |
+| LLM Cache | `test_llm_cache.py` | LLM response кэширование |
+| Translation | `test_translation.py` | Перевод названий вакансий |
+| Lazy Loading | `test_lazy_loading.py` | Lazy loading в браузере |
 
 ## Запуск тестов
 
 ```bash
-# ВСЕ тесты (~290 штук, ~1 сек)
+# ВСЕ тесты (~310 штук, ~1 сек)
 python -m pytest tests/ -v
 
 # Только smoke тесты (быстро)
@@ -29,6 +32,7 @@ python -m pytest tests/test_smoke_llm_base.py -v
 python -m pytest tests/test_smoke_prompts.py -v
 python -m pytest tests/test_smoke_browser.py -v
 python -m pytest tests/test_smoke_extraction.py -v
+python -m pytest tests/test_llm_cache.py -v
 
 # Быстрый запуск без verbose
 python -m pytest tests/ -q
@@ -42,7 +46,8 @@ python -m pytest tests/ -q
 |------|-------|
 | `src/llm/base.py`, `html_utils.py`, `job_extraction.py`, `url_discovery.py` | `test_smoke_llm_base.py`, `test_integration_parsing.py` |
 | `src/llm/prompts.py` | `test_smoke_prompts.py` |
-| `src/browser/loader.py` | `test_smoke_browser.py` |
+| `src/llm/cache.py` | `test_llm_cache.py` |
+| `src/browser/loader.py` | `test_smoke_browser.py`, `test_lazy_loading.py` |
 | `src/extraction/*.py` | `test_smoke_extraction.py`, `test_integration_parsing.py` |
 | `src/searchers/job_boards/*.py` | `test_job_board_parsers.py` |
 | `src/searchers/website.py`, `job_extraction.py`, `job_filters.py` | `test_website_filters.py` |
@@ -60,10 +65,11 @@ python -m pytest tests/ -q --tb=short
 tests/
 ├── __init__.py
 ├── conftest.py                    # Общие фикстуры
-├── fixtures/                      # Тестовые HTML файлы (19 файлов)
+├── fixtures/                      # Тестовые HTML файлы (21 файл)
 │   │
 │   │  # Job Board платформы (специализированные парсеры)
 │   ├── greenhouse_style.html      # Greenhouse job board
+│   ├── hibob_jobs.html            # HiBob job board (Angular SPA)
 │   ├── hrworks_jobs.html          # HRworks job board
 │   ├── lever_jobs.html            # Lever job board
 │   ├── odoo_jobs.html             # Odoo CMS
@@ -75,6 +81,7 @@ tests/
 │   │  # Custom sites (LLM extraction)
 │   ├── schema_org_jobs.html       # Schema.org JSON-LD (custom site)
 │   ├── ui_city_jobs.html          # ui.city - Custom site (Smart City)
+│   ├── abs_karriere_jobs.html     # abs-karriere.de - lazy loading
 │   ├── 1nce_jobs.html             # 1nce.com - Custom site (IoT)
 │   ├── 3p_services_jobs.html      # 3p-services.com - Custom site (Pipeline)
 │   ├── 3ss_careers.html           # 3ss.tv - Streaming
@@ -84,14 +91,17 @@ tests/
 │   ├── 711media_jobs.html         # 711media.de - Digital
 │   ├── 8com_jobs.html             # 8com.de - Security
 │   └── pdf_links_jobs.html        # PDF links filtering
-├── test_smoke_llm_base.py         # LLM/HTML утилиты: clean_html, extract_json (35 тестов)
-├── test_smoke_prompts.py          # Промпты: форматирование (24 теста)
-├── test_smoke_browser.py          # Браузер: BrowserLoader (19 тестов)
-├── test_smoke_extraction.py       # Экстракция: Schema.org (25 тестов)
-├── test_integration_parsing.py    # Парсинг с реальным HTML (78 тестов)
-├── test_job_board_parsers.py      # Job Board парсеры (77 тестов)
-├── test_website_filters.py        # Фильтрация вакансий (21 тест)
-└── test_cache_manager.py          # CacheManager тесты
+├── test_smoke_llm_base.py         # LLM/HTML утилиты: clean_html, extract_json, html_to_markdown
+├── test_smoke_prompts.py          # Промпты: форматирование
+├── test_smoke_browser.py          # Браузер: BrowserLoader
+├── test_smoke_extraction.py       # Экстракция: Schema.org
+├── test_integration_parsing.py    # Парсинг с реальным HTML
+├── test_job_board_parsers.py      # Job Board парсеры (Lever, Personio, HiBob, etc.)
+├── test_website_filters.py        # Фильтрация вакансий
+├── test_cache_manager.py          # CacheManager тесты
+├── test_llm_cache.py              # LLM response cache тесты
+├── test_translation.py            # Перевод названий
+└── test_lazy_loading.py           # Lazy loading тесты
 ```
 
 ## Покрытие тестами
@@ -100,6 +110,7 @@ tests/
 
 **html_utils.py:**
 - `clean_html()` - очистка HTML от скриптов, стилей, cookie dialogs
+- `html_to_markdown()` - конвертация HTML в Markdown для экономии токенов
 - `extract_json()` - парсинг JSON из ответов LLM
 - `extract_url()` - извлечение URL из текста
 
@@ -145,7 +156,22 @@ tests/
 - **GreenhouseParser** - `.opening`, `/jobs/` ссылки
 - **OdooParser** - `.o_job`, `/jobs/detail/` ссылки
 - **HRworksParser** - HRworks job board
+- **HiBobParser** - HiBob Angular SPA (`b-virtual-scroll-list-item`)
 - **TalentionDetection** - Talention platform detection
+
+### `test_llm_cache.py` (LLM Cache)
+- Кэширование ответов с namespace-based TTL
+- `CacheNamespace`: JOBS (6h), TRANSLATION (30d), URL_DISCOVERY (7d), COMPANY_INFO (30d)
+- Статистика: hits, misses, tokens saved
+
+### `test_translation.py` (Перевод)
+- Перевод названий вакансий на английский
+- Валидация переводов
+- Dictionary fallback для частых терминов
+
+### `test_lazy_loading.py` (Lazy Loading)
+- Обработка lazy loading на страницах
+- Scrolling для загрузки контента
 
 ### `test_website_filters.py` (Фильтрация)
 - Нормализация доменов
