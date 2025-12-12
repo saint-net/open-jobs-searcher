@@ -1,0 +1,26 @@
+{
+  "jobs": [
+    {
+      "title": "DevOps Engineer",
+      "url": "https://example.com/jobs/devops",
+      "location": "Hamburg",
+      "department": null,
+      "company": null
+    },
+    {
+      "title": "Product Manager (m/w/d)",
+      "url": "https://example.com/jobs/pm",
+      "location": "Munich",
+      "department": null,
+      "company": "Example GmbH"
+    },
+    {
+      "title": "Senior Software Developer (m/w/d)",
+      "url": "https://example.com/jobs/senior-dev",
+      "location": "Berlin",
+      "department": null,
+      "company": "Example GmbH"
+    }
+  ],
+  "count": 3
+}

@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "title": "Data Scientist",
+      "location": "Hamburg",
+      "url": "https://jobs.lever.co/levercompany/jkl012",
+      "department": null
+    },
+    {
+      "title": "DevOps Engineer",
+      "location": "Munich, GermanyInfrastructure",
+      "url": "https://jobs.lever.co/levercompany/ghi789",
+      "department": null
+    },
+    {
+      "title": "Product Designer (m/w/d)",
+      "location": "Remote - EuropeDesign",
+      "url": "https://jobs.lever.co/levercompany/def456",
+      "department": null
+    },
+    {
+      "title": "Senior Backend Engineer",
+      "location": "Berlin, GermanyEngineering",
+      "url": "https://jobs.lever.co/levercompany/abc123",
+      "department": null
+    }
+  ],
+  "count": 4
+}

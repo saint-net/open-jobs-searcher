@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "title": "Customer Success Manager (m/w/d)",
+      "location": "Hamburg",
+      "url": "https://company.com/jobs/detail/customer-success-4",
+      "department": null
+    },
+    {
+      "title": "Projektmanager (m/w/d)",
+      "location": "München",
+      "url": "https://company.com/jobs/detail/projektmanager-2",
+      "department": null
+    },
+    {
+      "title": "Sales Manager DACH (m/w/d)",
+      "location": "Remote",
+      "url": "https://company.com/jobs/detail/sales-manager-3",
+      "department": null
+    },
+    {
+      "title": "Softwareentwickler Python (m/w/d)",
+      "location": "Berlin",
+      "url": "https://company.com/jobs/detail/softwareentwickler-python-1",
+      "department": null
+    }
+  ],
+  "count": 4
+}

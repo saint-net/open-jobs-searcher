@@ -1,0 +1,23 @@
+{
+  "jobs": [
+    {
+      "title": "Frontend Developer (m/w/d)",
+      "location": "Berlin, Germany",
+      "url": "https://recruiteecompany.recruitee.com/o/frontend-developer",
+      "department": "Engineering"
+    },
+    {
+      "title": "Sales Manager DACH",
+      "location": "Munich, Bavaria, Germany",
+      "url": "https://recruiteecompany.recruitee.com/o/sales-manager",
+      "department": "Sales"
+    },
+    {
+      "title": "UX Designer",
+      "location": "Remote",
+      "url": "https://recruiteecompany.recruitee.com/o/ux-designer",
+      "department": "Design"
+    }
+  ],
+  "count": 3
+}

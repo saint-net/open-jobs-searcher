@@ -12,13 +12,16 @@ The fixtures simulate real-world HTML structures:
 - odoo_jobs.html: Odoo CMS careers page
 """
 
+import json
+import re
 import pytest
 from pathlib import Path
+from typing import Optional
 from unittest.mock import AsyncMock
 
 from src.extraction.extractor import HybridJobExtractor
 from src.extraction.strategies import SchemaOrgStrategy
-from src.llm.base import BaseLLMProvider
+from src.llm.html_utils import clean_html, extract_json
 
 
 # Path to fixtures
@@ -31,13 +34,18 @@ def load_fixture(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-class MockLLMProvider(BaseLLMProvider):
-    """Mock LLM for testing extraction methods."""
+class MockLLMProvider:
+    """Pure mock LLM for testing - NO inheritance from BaseLLMProvider.
+    
+    This is a protocol-compliant mock that avoids tight coupling to production code.
+    Only implements methods actually used in tests.
+    """
     
     def __init__(self):
         self.complete_calls = []
     
-    async def complete(self, prompt: str, system: str = None) -> str:
+    async def complete(self, prompt: str, system: Optional[str] = None) -> str:
+        """Mock LLM completion - returns realistic responses based on content."""
         self.complete_calls.append(prompt)
         # Return realistic LLM response based on HTML content
         if "Backend Engineer" in prompt:
@@ -66,6 +74,14 @@ class MockLLMProvider(BaseLLMProvider):
 }
 ```'''
         return '{"jobs": [], "next_page_url": null}'
+    
+    def _clean_html(self, html: str) -> str:
+        """Clean HTML - delegates to actual implementation for realistic testing."""
+        return clean_html(html)
+    
+    def _extract_json(self, response: str) -> dict | list:
+        """Extract JSON from LLM response - delegates to actual implementation."""
+        return extract_json(response)
 
 
 class TestSchemaOrgParsing:

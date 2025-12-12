@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "title": "Product Manager",
+      "location": "Munich",
+      "url": "https://personio-company.jobs.personio.de/job/12346",
+      "department": null
+    },
+    {
+      "title": "Senior Data Engineer",
+      "location": "Unknown",
+      "url": "https://personio-company.jobs.personio.de/job/12348",
+      "department": null
+    },
+    {
+      "title": "Software Developer (m/w/d)",
+      "location": "Berlin",
+      "url": "https://personio-company.jobs.personio.de/job/12345",
+      "department": null
+    },
+    {
+      "title": "Working student - Marketing (all)Intern / Student,",
+      "location": "Hamburg",
+      "url": "https://personio-company.jobs.personio.de/job/12347",
+      "department": null
+    }
+  ],
+  "count": 4
+}

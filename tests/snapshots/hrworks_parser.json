@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "title": "Berufsorientierung",
+      "location": "Rain, Nelkenweg 6a, Deutschland",
+      "url": "https://jobs.company.de/de?id=dfb602",
+      "department": "IT und Software-Entwicklung"
+    },
+    {
+      "title": "Initiativbewerbung",
+      "location": "Rain, Nelkenweg 6a, Deutschland",
+      "url": "https://jobs.company.de/de?id=ba346a",
+      "department": "Sonstiges"
+    },
+    {
+      "title": "Kaufmännischer Sachbearbeiter Schwerpunkt Finanzbuchhaltung (m/w/d)",
+      "location": "Rain, Nelkenweg 6a, Deutschland",
+      "url": "https://jobs.company.de/de?id=c1b372",
+      "department": "Finanzbuchhaltung und Controlling"
+    },
+    {
+      "title": "Küchenprofi (m/w/d) in Teilzeit  für unsere Betriebskantine",
+      "location": "Unknown",
+      "url": "https://jobs.company.de/de?id=96041e",
+      "department": "Sonstiges"
+    }
+  ],
+  "count": 4
+}

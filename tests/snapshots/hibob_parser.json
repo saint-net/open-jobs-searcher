@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "title": "DevOps Engineer (m/w/d)",
+      "location": "Remote",
+      "url": "https://company.careers.hibob.com/jobs/devops-engineer",
+      "department": "Infrastructure"
+    },
+    {
+      "title": "Marketing Lead (f/m/x)",
+      "location": "Berlin",
+      "url": "https://company.careers.hibob.com/jobs/marketing-lead",
+      "department": "Marketing"
+    },
+    {
+      "title": "Product Manager (f/m/d)",
+      "location": "Munich",
+      "url": "https://company.careers.hibob.com/jobs/product-manager",
+      "department": "Product"
+    },
+    {
+      "title": "Senior Software Engineer (f/m/x)",
+      "location": "Germany, Remote",
+      "url": "https://company.careers.hibob.com/jobs/senior-software-engineer",
+      "department": "Dev"
+    }
+  ],
+  "count": 4
+}
