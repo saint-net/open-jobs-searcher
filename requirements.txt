@@ -10,6 +10,7 @@ tldextract>=5.1.0
 
 # Data processing
 pandas>=2.2.3
+markdownify>=0.13.1
 
 # Configuration
 python-dotenv>=1.0.0

@@ -74,6 +74,7 @@ What IS a job posting:
 What is NOT a job (DO NOT EXTRACT):
 - Department headers: "IT Department", "Human Resources" (without job title)
 - Promotional text: "We're hiring in Sales"
+- Open/unsolicited applications: "Initiativbewerbung", "Spontanbewerbung", "Open Application", "Speculative Application"
 
 For EACH job, extract:
 - title: Job title (keep (m/w/d), remove "Job advert"/"Stellenanzeige" suffixes)

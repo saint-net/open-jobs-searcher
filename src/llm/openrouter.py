@@ -278,13 +278,38 @@ class OpenRouterProvider(BaseLLMProvider):
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
         
-        self.usage_stats.add_call(prompt_tokens, completion_tokens, elapsed, 0.0)
+        # OpenRouter returns cost in usage.total_cost (in USD)
+        # Fallback: calculate from known model prices
+        cost_usd = usage.get("total_cost", 0.0)
+        if cost_usd == 0.0 and (prompt_tokens or completion_tokens):
+            cost_usd = self._estimate_cost(prompt_tokens, completion_tokens)
+        
+        self.usage_stats.add_call(prompt_tokens, completion_tokens, elapsed, cost_usd)
         
         mode = "JSON" if json_mode else "text"
         logger.debug(
             f"LLM {mode} call: {prompt_tokens}+{completion_tokens} tokens, "
             f"{elapsed:.2f}s, model={self.model}"
         )
+    
+    def _estimate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
+        """Estimate cost based on known model pricing (USD per 1M tokens)."""
+        # Prices as of Dec 2024: https://openrouter.ai/models
+        MODEL_PRICES = {
+            "openai/gpt-4o-mini": {"input": 0.15, "output": 0.60},
+            "openai/gpt-4o": {"input": 2.50, "output": 10.00},
+            "openai/gpt-4o-2024-08-06": {"input": 2.50, "output": 10.00},
+            "anthropic/claude-3.5-sonnet": {"input": 3.00, "output": 15.00},
+            "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
+            "google/gemini-flash-1.5": {"input": 0.075, "output": 0.30},
+        }
+        
+        prices = MODEL_PRICES.get(self.model, {"input": 0.50, "output": 1.50})  # default fallback
+        
+        input_cost = (prompt_tokens / 1_000_000) * prices["input"]
+        output_cost = (completion_tokens / 1_000_000) * prices["output"]
+        
+        return input_cost + output_cost
 
     def _extract_content(self, data: dict) -> str:
         """Extract text content from API response."""
