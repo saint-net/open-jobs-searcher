@@ -1,4 +1,4 @@
-# check-logs
+# implementation
 
 Imagine a panel of experts reviewing this web scraping and LLM-based job extraction implementation and its logs:
 
