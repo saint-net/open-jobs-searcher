@@ -8,10 +8,11 @@
 - 🇩🇪 Поиск вакансий на StepStone.de - Германия
 - 🇦🇹 Поиск вакансий на Karriere.at - Австрия
 - 🤖 Поиск вакансий на любом сайте компании с помощью LLM
-- 🎯 Автоматическое определение популярных job board платформ (Personio, Greenhouse, Lever, Workable, Recruitee, Deloitte, SmartRecruiters, Ashby, Breezy и др.)
+- 🎯 Автоматическое определение популярных job board платформ (Personio, Greenhouse, Lever, Workable, Recruitee, HiBob, Deloitte, SmartRecruiters, Ashby, Breezy и др.)
 - 📊 Гибридная экстракция вакансий (Schema.org + LLM)
 - 📑 Автоматическая пагинация (до 3 страниц)
 - 💾 Кэширование вакансий в SQLite с отслеживанием изменений
+- 🧠 LLM кэширование ответов для экономии токенов (до 70% экономии)
 - 📜 История изменений: новые/закрытые/вернувшиеся вакансии
 - 🎯 Фильтрация по городу, опыту, зарплате
 - 📊 Экспорт результатов в JSON и CSV
@@ -262,17 +263,18 @@ open-jobs-searcher/
 │   │   ├── candidate.py     # JobCandidate с scoring
 │   │   └── strategies.py    # Стратегии (Schema.org, PDF)
 │   ├── browser/         # Playwright загрузчик (SPA)
-│   │   ├── loader.py        # Загрузчик страниц
+│   │   ├── loader.py        # Загрузчик страниц (lazy loading, scrolling)
 │   │   ├── navigation.py    # Навигация по сайту
 │   │   ├── cookie_handler.py # Обработка cookies
 │   │   ├── patterns.py      # Паттерны для поиска
 │   │   └── exceptions.py    # Исключения
 │   ├── llm/             # LLM провайдеры
 │   │   ├── base.py          # Базовый класс LLM
-│   │   ├── html_utils.py    # Утилиты для HTML/JSON
+│   │   ├── cache.py         # LLM response cache (namespace-based TTL)
+│   │   ├── html_utils.py    # Утилиты для HTML/JSON, HTML→Markdown
 │   │   ├── job_extraction.py # LLMJobExtractor
 │   │   ├── url_discovery.py # LLMUrlDiscovery
-│   │   ├── openrouter.py    # OpenRouter провайдер
+│   │   ├── openrouter.py    # OpenRouter провайдер (structured output)
 │   │   ├── ollama.py        # Ollama провайдер
 │   │   └── prompts.py       # Промпты для парсинга
 │   └── searchers/
@@ -296,6 +298,7 @@ open-jobs-searcher/
 │           ├── workable.py   # Workable
 │           ├── recruitee.py  # Recruitee
 │           ├── hrworks.py    # HRworks
+│           ├── hibob.py      # HiBob
 │           ├── odoo.py       # Odoo CMS
 │           └── deloitte.py   # Deloitte
 └── README.md
@@ -311,6 +314,9 @@ open-jobs-searcher/
 - **Lever** - платформа для рекрутинга
 - **Workable** - система управления наймом
 - **Recruitee** - платформа для найма (API-based)
+- **HiBob** - HR платформа (Angular SPA)
+- **HRworks** - HR и ATS платформа
+- **Odoo** - CMS с модулем вакансий
 - **Deloitte** - корпоративный job board
 - **SmartRecruiters** - HR платформа
 - **Ashby** - современная ATS
@@ -355,6 +361,14 @@ OPENROUTER_ALLOW_FALLBACKS=true
 - ❌ **Отслеживание закрытых вакансий** - показывает какие вакансии больше не доступны
 - ↻ **Вернувшиеся вакансии** - если закрытая вакансия снова появилась
 - 📜 **История изменений** - команда `history` для просмотра всех изменений
+
+### LLM кэширование
+
+LLM ответы кэшируются с разными TTL для экономии токенов:
+- **Вакансии** - 6 часов (часто обновляются)
+- **Переводы** - 30 дней (стабильны)
+- **URL discovery** - 7 дней (career URLs редко меняются)
+- **Информация о компании** - 30 дней (стабильна)
 
 ### Отключение кэширования
 

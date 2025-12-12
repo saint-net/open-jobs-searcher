@@ -44,7 +44,7 @@ Open Jobs Searcher - это инструмент для поиска вакан�
 #### Поддерживаемые платформы
 - Personio, Greenhouse, Lever - HTML парсинг
 - Workable, Deloitte - HTML парсинг
-- HRworks - HTML парсинг
+- HRworks, HiBob - HTML парсинг
 - Odoo - CMS парсинг
 - Recruitee - API-based парсинг
 - SmartRecruiters, Ashby, Breezy HR - HTML парсинг
@@ -112,8 +112,19 @@ job_history (id, job_id, event, changed_at, details)
 
 #### HTML утилиты (`html_utils.py`)
 - `clean_html()` - очистка HTML от скриптов, стилей, cookie dialogs
+- `html_to_markdown()` - конвертация HTML в Markdown для уменьшения токенов (до 70% экономии)
 - `extract_url()` - извлечение URL из ответа LLM
 - `extract_json()` - парсинг JSON из ответа LLM (markdown блоки, raw JSON)
+
+#### LLM Cache (`cache.py`)
+Кэширование LLM ответов с разными TTL по типам операций:
+- `LLMCache` - основной класс кэша
+- `CacheNamespace` - пространства имён:
+  - `JOBS` - 6 часов (вакансии часто меняются)
+  - `TRANSLATION` - 30 дней (переводы стабильны)
+  - `URL_DISCOVERY` - 7 дней (career URLs редко меняются)
+  - `COMPANY_INFO` - 30 дней (описания компаний стабильны)
+- Статистика: hits/misses, tokens saved, estimated cost saved
 
 #### LLMJobExtractor (`job_extraction.py`)
 Извлечение вакансий через LLM:
@@ -138,6 +149,7 @@ job_history (id, job_id, event, changed_at, details)
   - Provider routing: выбор конкретного бэкенда (chutes, siliconflow, etc.)
   - Retry logic для transient errors
   - Configurable fallbacks
+  - Structured Output: `response_format={"type": "json_schema"}` для строгой типизации
 
 #### Промпты (`prompts.py`)
 - Структурированные промпты для парсинга вакансий
@@ -351,28 +363,34 @@ CLI (history) → JobRepository → job_history table → Output
 
 | Тип | Файлы | Описание |
 |-----|-------|----------|
-| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций (103 теста) |
-| Integration | `test_integration_*.py` | Парсинг с сохранённым HTML (78 тестов) |
-| Job Boards | `test_job_board_parsers.py` | Парсеры платформ (77 тестов) |
-| Filters | `test_website_filters.py` | Фильтрация вакансий (21 тест) |
-| Cache | `test_cache_manager.py` | CacheManager и дедупликация |
+| Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций |
+| Integration | `test_integration_*.py` | Парсинг с сохранённым HTML |
+| Job Boards | `test_job_board_parsers.py` | Парсеры платформ |
+| Filters | `test_website_filters.py` | Фильтрация вакансий |
+| Cache | `test_cache_manager.py`, `test_llm_cache.py` | CacheManager, LLM cache |
+| Translation | `test_translation.py` | Перевод названий |
+| Lazy Loading | `test_lazy_loading.py` | Lazy loading в браузере |
 
 ### Структура
 
 ```
 tests/
-├── fixtures/                      # Тестовые HTML (19 файлов)
+├── fixtures/                      # Тестовые HTML (21 файл)
 ├── test_smoke_*.py                # Smoke тесты модулей
 ├── test_integration_parsing.py    # E2E парсинг
-├── test_job_board_parsers.py      # Lever, Personio, Recruitee, Workable, Greenhouse, Odoo, HRworks
+├── test_job_board_parsers.py      # Lever, Personio, Recruitee, Workable, Greenhouse, Odoo, HRworks, HiBob
 ├── test_website_filters.py        # Фильтрация и нормализация
-└── test_cache_manager.py          # CacheManager тесты
+├── test_cache_manager.py          # CacheManager тесты
+├── test_llm_cache.py              # LLM cache тесты
+├── test_translation.py            # Перевод названий
+└── test_lazy_loading.py           # Lazy loading тесты
 ```
 
 ### Запуск
 
 ```bash
-python -m pytest tests/ -q                        # Все тесты (~300 штук, ~1 сек)
+python -m pytest tests/ -q                        # Все тесты (~310 штук, ~1 сек)
 python -m pytest tests/test_job_board_parsers.py  # После изменений в job_boards/
 python -m pytest tests/test_cache_manager.py      # После изменений в cache_manager
+python -m pytest tests/test_llm_cache.py          # После изменений в llm/cache.py
 ```
