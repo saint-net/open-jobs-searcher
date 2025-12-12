@@ -83,21 +83,6 @@ async def handle_cookie_consent(page: Page) -> bool:
     except Exception as e:
         logger.debug(f"cmpbox handling error: {e}")
     
-    # Debug: check what buttons exist
-    try:
-        all_buttons = await page.query_selector_all('button')
-        button_texts = []
-        for btn in all_buttons[:10]:  # First 10 buttons
-            try:
-                txt = await btn.inner_text()
-                if txt and txt.strip():
-                    button_texts.append(txt.strip()[:30])
-            except Exception:
-                pass
-        if button_texts:
-            logger.debug(f"Found buttons on page: {button_texts}")
-    except Exception as e:
-        logger.debug(f"Error listing buttons: {e}")
     
     for selector in COOKIE_DIALOG_SELECTORS:
         try:
@@ -127,8 +112,113 @@ async def handle_cookie_consent(page: Page) -> bool:
         except Exception:
             continue
     
-    logger.debug("No cookie consent dialog found")
     return False
 
+
+# Patterns for "expand/read more" buttons that hide job content
+EXPAND_BUTTON_PATTERNS = [
+    r'mehr\s*lesen',      # German: Read more
+    r'weiterlesen',       # German: Continue reading
+    r'mehr\s*anzeigen',   # German: Show more
+    r'alle\s*anzeigen',   # German: Show all
+    r'read\s*more',       # English
+    r'show\s*more',       # English
+    r'view\s*more',       # English
+    r'expand',            # English
+    r'see\s*all',         # English
+    r'load\s*more',       # English
+]
+
+
+async def expand_collapsed_content(page: Page, max_clicks: int = 5) -> int:
+    """
+    Click "expand" / "read more" buttons to reveal hidden content.
+    
+    Args:
+        page: Playwright page object
+        max_clicks: Maximum number of expand buttons to click
+        
+    Returns:
+        Number of buttons clicked
+    """
+    clicked = 0
+    
+    try:
+        # Find all buttons and clickable elements
+        # Include span/div with onclick or clickable styling
+        selectors = [
+            'button', 'a', '[role="button"]', '.btn', 
+            '[class*="expand"]', '[class*="more"]', '[class*="toggle"]',
+            'span[onclick]', 'div[onclick]', '[class*="read-more"]', '[class*="readmore"]',
+        ]
+        
+        candidates_found = []
+        
+        for selector in selectors:
+            if clicked >= max_clicks:
+                break
+                
+            try:
+                elements = await page.query_selector_all(selector)
+                
+                for element in elements:
+                    if clicked >= max_clicks:
+                        break
+                        
+                    try:
+                        text = await element.inner_text()
+                        if not text:
+                            continue
+                        
+                        text_clean = text.strip()
+                        text_lower = text_clean.lower()
+                        
+                        # Check if it matches expand patterns
+                        for pattern in EXPAND_BUTTON_PATTERNS:
+                            if re.search(pattern, text_lower, re.IGNORECASE):
+                                candidates_found.append(text_clean[:30])
+                                try:
+                                    # Quick check: skip if element is detached or not actionable
+                                    tag = await element.evaluate("el => el.tagName.toLowerCase()")
+                                    if tag not in ('button', 'a', 'input', 'div', 'span'):
+                                        continue
+                                    
+                                    # For <a> tags, check if it has href (real link vs fake button)
+                                    if tag == 'a':
+                                        href = await element.get_attribute('href')
+                                        # If it's a real navigation link, skip (we don't want to navigate)
+                                        if href and not href.startswith('#') and not href.startswith('javascript:'):
+                                            continue
+                                    
+                                    # Use JS click - bypasses all Playwright actionability checks
+                                    # dispatchEvent ensures React/Vue state updates trigger
+                                    await element.evaluate("""el => {
+                                        try {
+                                            el.click();
+                                            el.dispatchEvent(new Event('click', {bubbles: true}));
+                                        } catch(e) {}
+                                    }""")
+                                    
+                                    await page.wait_for_timeout(400)
+                                    clicked += 1
+                                    logger.debug(f"Expanded content: '{text_clean[:40]}'")
+                                    break  # Move to next element
+                                except Exception:
+                                    continue
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+    except Exception as e:
+        logger.debug(f"Error expanding content: {e}")
+    
+    if clicked > 0:
+        logger.debug(f"Expanded {clicked} collapsed section(s)")
+    elif candidates_found:
+        logger.debug(f"Found expand candidates but none clickable: {candidates_found[:5]}")
+    else:
+        logger.debug("No expandable content found")
+    
+    return clicked
 
 

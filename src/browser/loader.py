@@ -14,7 +14,7 @@ except ImportError:
 
 from .exceptions import DomainUnreachableError, PlaywrightBrowsersNotInstalledError
 from .patterns import DEFAULT_USER_AGENT, NETWORK_ERROR_PATTERNS
-from .cookie_handler import handle_cookie_consent
+from .cookie_handler import handle_cookie_consent, expand_collapsed_content
 from .navigation import (
     is_external_job_board,
     find_external_job_board_frame,
@@ -189,7 +189,18 @@ class BrowserLoader:
                 # Stop early: at bottom OR no changes for 2 scrolls (was 3)
                 if at_bottom or no_change_count >= 2:
                     if at_bottom:
-                        logger.debug(f"Reached bottom. Total elements: {current_count}")
+                        # Log element breakdown for debugging
+                        breakdown = await page.evaluate("""() => {
+                            const counts = {
+                                'article': document.querySelectorAll('article').length,
+                                '.job': document.querySelectorAll('.job').length,
+                                '[class*="job"]': document.querySelectorAll('[class*="job"]').length,
+                                '[class*="career"]': document.querySelectorAll('[class*="career"]').length,
+                                '[class*="position"]': document.querySelectorAll('[class*="position"]').length,
+                            };
+                            return Object.entries(counts).filter(([k,v]) => v > 0).map(([k,v]) => `${k}:${v}`).join(', ');
+                        }""")
+                        logger.debug(f"Reached bottom. Total elements: {current_count} ({breakdown or 'generic li/tr'})")
                     break
             
             # Final scroll to bottom (shorter wait)
@@ -401,12 +412,20 @@ class BrowserLoader:
             # Ждём начальный рендеринг
             await page.wait_for_timeout(2000)
             
-            # Обрабатываем cookie consent
+            # Обрабатываем cookie consent (до 3 попыток, диалог может появиться с задержкой)
+            cookie_handled = False
             for _ in range(3):
                 if await handle_cookie_consent(page):
+                    cookie_handled = True
                     await page.wait_for_timeout(500)
                     break
                 await page.wait_for_timeout(300)
+            
+            if not cookie_handled:
+                logger.debug("No cookie consent dialog found")
+            
+            # Раскрываем скрытый контент (кнопки "Mehr Lesen", "Read More" и т.д.)
+            await expand_collapsed_content(page)
             
             # NOTE: Don't scroll here - we'll scroll once after final navigation
             # This avoids double scrolling which was causing 80+ second delays
@@ -567,12 +586,16 @@ class BrowserLoader:
             await page.wait_for_timeout(2000)
             
             # Ждём и обрабатываем cookie consent диалоги (может появиться с задержкой)
+            cookie_handled = False
             for _ in range(3):
                 if await handle_cookie_consent(page):
+                    cookie_handled = True
                     await page.wait_for_timeout(1000)
                     break
-                # Ждём появления диалога
                 await page.wait_for_timeout(500)
+            
+            if not cookie_handled:
+                logger.debug("No cookie consent dialog found")
             
             # Получаем первоначальный HTML
             html = await page.content()

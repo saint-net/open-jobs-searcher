@@ -301,12 +301,21 @@ class TestMaybeExtractCompanyInfo:
     async def test_extracts_and_saves_description(self, cache_manager, mock_repository):
         """Extracts and saves company description."""
         site = MockSite(id=1, domain="example.com", description=None)
-        cache_manager._fetch_html = AsyncMock(return_value="<html>...</html>")
         cache_manager._extract_company_info = AsyncMock(return_value="Tech company in Berlin")
         
-        await cache_manager._maybe_extract_company_info(site, "example.com")
+        # Mock aiohttp.ClientSession since _maybe_extract_company_info uses it directly
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.text = AsyncMock(return_value="<html>...</html>")
         
-        cache_manager._fetch_html.assert_called_once_with("https://example.com")
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response)))
+        
+        with patch("aiohttp.ClientSession") as mock_client:
+            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_client.return_value.__aexit__ = AsyncMock()
+            await cache_manager._maybe_extract_company_info(site, "example.com")
+        
         mock_repository.update_site_description.assert_called_once_with(1, "Tech company in Berlin")
     
     @pytest.mark.asyncio
