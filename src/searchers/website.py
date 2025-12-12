@@ -524,6 +524,8 @@ class WebsiteSearcher(BaseSearcher):
                 source=f"website:{urlparse(url).netloc}",
                 title_en=titles_en[idx] if idx < len(titles_en) else None,
                 description=job_data.get("description"),
+                extraction_method=job_data.get("extraction_method"),
+                extraction_details=job_data.get("extraction_details"),
             )
             jobs.append(job)
 
@@ -604,6 +606,8 @@ class WebsiteSearcher(BaseSearcher):
                 source=f"website:{urlparse(url).netloc}",
                 title_en=titles_en[idx] if idx < len(titles_en) else None,
                 description=job_data.get("description"),
+                extraction_method=job_data.get("extraction_method"),
+                extraction_details=job_data.get("extraction_details"),
             )
             jobs.append(job)
 

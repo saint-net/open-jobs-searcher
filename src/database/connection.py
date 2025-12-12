@@ -82,6 +82,21 @@ async def _run_migrations(db) -> None:
         await db.execute("CREATE INDEX idx_llm_cache_namespace ON llm_cache(namespace)")
         await db.execute("CREATE INDEX idx_llm_cache_expiry ON llm_cache(created_at, ttl_seconds)")
         await db.commit()
+    
+    # Migration: Add extraction_method column to jobs table if it doesn't exist
+    cursor = await db.execute("PRAGMA table_info(jobs)")
+    columns = await cursor.fetchall()
+    job_column_names = [col[1] for col in columns]
+    
+    if "extraction_method" not in job_column_names:
+        logger.debug("Adding 'extraction_method' column to jobs table")
+        await db.execute("ALTER TABLE jobs ADD COLUMN extraction_method TEXT")
+        await db.commit()
+    
+    if "extraction_details" not in job_column_names:
+        logger.debug("Adding 'extraction_details' column to jobs table")
+        await db.execute("ALTER TABLE jobs ADD COLUMN extraction_details TEXT")
+        await db.commit()
 
 
 SCHEMA = """
@@ -127,6 +142,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     experience TEXT,
     employment_type TEXT,
     skills TEXT,
+    extraction_method TEXT,  -- "job_board:platform", "schema_org", "llm", "pdf_link", "api"
+    extraction_details TEXT,  -- JSON: {confidence, model, source_url, attempts, ...}
     first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_active BOOLEAN DEFAULT TRUE,

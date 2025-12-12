@@ -434,19 +434,21 @@ class JobRepository:
     async def _insert_job(self, db: aiosqlite.Connection, site_id: int, job: Job) -> int:
         """Insert new job into database."""
         skills_json = json.dumps(job.skills) if job.skills else None
+        details_json = json.dumps(job.extraction_details) if job.extraction_details else None
         
         cursor = await db.execute(
             """
             INSERT INTO jobs (
                 site_id, external_id, title, title_en, company, location,
                 url, description, salary_from, salary_to, salary_currency,
-                experience, employment_type, skills
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                experience, employment_type, skills, extraction_method, extraction_details
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 site_id, job.id, job.title, job.title_en, job.company, job.location,
                 job.url, job.description, job.salary_from, job.salary_to,
-                job.salary_currency, job.experience, job.employment_type, skills_json
+                job.salary_currency, job.experience, job.employment_type, skills_json,
+                job.extraction_method, details_json
             )
         )
         return cursor.lastrowid
@@ -625,6 +627,16 @@ class JobRepository:
     
     def _row_to_cached_job(self, row) -> CachedJob:
         """Convert database row to CachedJob."""
+        # Handle migration: extraction fields may not exist in old DBs
+        extraction_method = None
+        extraction_details = None
+        row_keys = row.keys()
+        
+        if "extraction_method" in row_keys:
+            extraction_method = row["extraction_method"]
+        if "extraction_details" in row_keys:
+            extraction_details = row["extraction_details"]
+        
         return CachedJob(
             id=row["id"],
             site_id=row["site_id"],
@@ -641,6 +653,8 @@ class JobRepository:
             experience=row["experience"],
             employment_type=row["employment_type"],
             skills=row["skills"],
+            extraction_method=extraction_method,
+            extraction_details=extraction_details,
             first_seen_at=self._parse_datetime(row["first_seen_at"]),
             last_seen_at=self._parse_datetime(row["last_seen_at"]),
             is_active=bool(row["is_active"]),

@@ -22,6 +22,8 @@ class JobDict(TypedDict, total=False):
     salary_currency: Optional[str]
     experience: Optional[str]
     employment_type: Optional[str]
+    extraction_method: Optional[str]  # "job_board:platform", "schema_org", "llm", "pdf_link", "api"
+    extraction_details: Optional[dict]  # {confidence, model, source_url, attempts, ...}
 
 
 class JobExtractionResult(TypedDict):
@@ -118,6 +120,8 @@ class Job(BaseModel):
     salary_currency: Optional[str] = None
     experience: Optional[str] = None
     employment_type: Optional[str] = None
+    extraction_method: Optional[str] = None  # "job_board:platform", "schema_org", "llm", etc.
+    extraction_details: Optional[dict] = None  # {confidence, model, source_url, attempts, ...}
     skills: list[str] = Field(default_factory=list)
     published_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.now)

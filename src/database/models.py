@@ -2,7 +2,20 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Optional
+
+
+class ExtractionMethod(str, Enum):
+    """Method used to extract job from page.
+    
+    Stored in DB to track extraction quality and enable analytics.
+    """
+    JOB_BOARD = "job_board"      # Known platform parser (Greenhouse, Lever, etc.)
+    SCHEMA_ORG = "schema_org"    # schema.org/JobPosting structured data
+    LLM = "llm"                  # LLM-based extraction
+    PDF_LINK = "pdf_link"        # Extracted from PDF/document link
+    API = "api"                  # Direct API (HeadHunter, StepStone, etc.)
 
 
 @dataclass
@@ -51,6 +64,8 @@ class CachedJob:
     experience: Optional[str] = None
     employment_type: Optional[str] = None
     skills: Optional[str] = None  # JSON string
+    extraction_method: Optional[str] = None  # ExtractionMethod value or "job_board:platform"
+    extraction_details: Optional[str] = None  # JSON: {confidence, model, source_url, attempts, ...}
     first_seen_at: Optional[datetime] = None
     last_seen_at: Optional[datetime] = None
     is_active: bool = True

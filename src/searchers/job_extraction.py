@@ -244,38 +244,85 @@ class JobExtractor:
                     final_url = external_board_url
             
             # Extract jobs using parser or LLM
+            # Track extraction attempts for debugging
+            attempts = []
+            
             if external_platform:
                 if self.job_board_parsers.is_api_based(external_platform):
                     jobs_data = await self._fetch_jobs_from_api(final_url, external_platform)
                 else:
                     jobs_data = self.job_board_parsers.parse(html, final_url, external_platform)
+                # Tag all jobs with extraction method and details
+                extraction_method = f"job_board:{external_platform}"
+                for job in jobs_data:
+                    job["extraction_method"] = extraction_method
+                    job["extraction_details"] = {
+                        "confidence": 1.0,  # Job board parsers are deterministic
+                        "source_url": final_url,
+                        "platform": external_platform,
+                    }
                 # No pagination for external platforms
             else:
                 # 1. Try Schema.org first (100% accuracy when available)
                 schema_strategy = SchemaOrgStrategy()
                 schema_candidates = schema_strategy.extract(html, final_url)
+                attempts.append(f"schema_org:{len(schema_candidates)}")
+                
                 if schema_candidates:
                     jobs_data = [c.to_dict() for c in schema_candidates]
+                    for job in jobs_data:
+                        job["extraction_method"] = "schema_org"
+                        job["extraction_details"] = {
+                            "confidence": 1.0,  # Schema.org is structured data
+                            "source_url": final_url,
+                            "attempts": attempts,
+                        }
                     logger.debug(f"Schema.org extracted {len(jobs_data)} jobs")
                 else:
                     # 2. Collect PDF links as supplement (strategy logs internally)
                     pdf_strategy = PdfLinkStrategy()
                     pdf_candidates = pdf_strategy.extract(html, final_url)
+                    attempts.append(f"pdf_link:{len(pdf_candidates)}")
                     
                     # 3. LLM as main extraction method
                     result = await self.llm.extract_jobs_with_pagination(html, final_url)
                     llm_jobs = result.get("jobs", [])
                     next_page_url = result.get("next_page_url")
+                    attempts.append(f"llm:{len(llm_jobs)}")
+                    
+                    # Tag LLM jobs with details
+                    for job in llm_jobs:
+                        job["extraction_method"] = "llm"
+                        job["extraction_details"] = {
+                            "confidence": 0.85,  # LLM extraction is probabilistic
+                            "source_url": final_url,
+                            "attempts": attempts,
+                        }
                     
                     # 4. Merge LLM + PDF results (deduplication happens in _deduplicate_jobs)
                     if llm_jobs:
-                        pdf_jobs = [c.to_dict() for c in pdf_candidates] if pdf_candidates else []
-                        if pdf_jobs:
+                        pdf_jobs = []
+                        if pdf_candidates:
+                            pdf_jobs = [c.to_dict() for c in pdf_candidates]
+                            for job in pdf_jobs:
+                                job["extraction_method"] = "pdf_link"
+                                job["extraction_details"] = {
+                                    "confidence": 0.9,  # PDF links are explicit
+                                    "source_url": final_url,
+                                    "attempts": attempts,
+                                }
                             logger.debug(f"Merging {len(llm_jobs)} LLM + {len(pdf_jobs)} PDF jobs")
                         jobs_data = llm_jobs + pdf_jobs
                     elif pdf_candidates:
                         # Fallback: PDF only if LLM found nothing
                         jobs_data = [c.to_dict() for c in pdf_candidates]
+                        for job in jobs_data:
+                            job["extraction_method"] = "pdf_link"
+                            job["extraction_details"] = {
+                                "confidence": 0.9,
+                                "source_url": final_url,
+                                "attempts": attempts,
+                            }
                         logger.debug(f"LLM found nothing, using {len(jobs_data)} PDF candidates")
             
             logger.debug(f"Extracted {len(jobs_data)} jobs from {final_url}")
