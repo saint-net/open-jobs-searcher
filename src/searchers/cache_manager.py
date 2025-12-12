@@ -172,7 +172,13 @@ class CacheManager:
         
         return jobs
     
-    async def save_to_cache(self, domain: str, careers_url: str, jobs: list[Job]) -> None:
+    async def save_to_cache(
+        self, 
+        domain: str, 
+        careers_url: str, 
+        jobs: list[Job],
+        skip_company_info: bool = False,
+    ) -> None:
         """Save discovered career URL and jobs to cache.
         
         Сохраняет сайт и career URL даже если вакансий сейчас нет,
@@ -182,6 +188,7 @@ class CacheManager:
             domain: Site domain
             careers_url: Discovered career page URL
             jobs: Found jobs (может быть пустым, если вакансий сейчас нет)
+            skip_company_info: Skip company info extraction (already done in parallel)
         """
         try:
             # Get or create site
@@ -189,7 +196,8 @@ class CacheManager:
             site = await self._repository.get_or_create_site(domain, company_name)
             
             # Extract company info on first scan (when no description yet)
-            await self._maybe_extract_company_info(site, domain)
+            if not skip_company_info:
+                await self._maybe_extract_company_info(site, domain)
             
             # Clean URL (remove query params that may be filters)
             clean_url = _clean_career_url(careers_url)

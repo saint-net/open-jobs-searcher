@@ -436,15 +436,16 @@ class WebsiteSearcher(BaseSearcher):
             if not careers_html:
                 return []
 
-            # 7. Convert to Job models with translation
-            jobs = await self._convert_jobs_data(jobs_data, url, careers_url)
+            # 7. Convert to Job models with translation + extract company info (PARALLEL)
+            jobs = await self._convert_jobs_data_with_company_info(jobs_data, url, careers_url, domain)
             
             # 9. Save to cache if enabled
             # Сохраняем сайт и career_url даже если вакансий сейчас нет,
             # чтобы отслеживать компанию при следующих сканированиях
             if self.use_cache and self._repository and careers_url:
                 cache_mgr = self._get_cache_manager()
-                await cache_mgr.save_to_cache(domain, careers_url, jobs)
+                # Company info уже извлечена параллельно с переводом
+                await cache_mgr.save_to_cache(domain, careers_url, jobs, skip_company_info=True)
                 self.last_sync_result = cache_mgr.last_sync_result
 
             return jobs
@@ -453,6 +454,100 @@ class WebsiteSearcher(BaseSearcher):
             logger.error(f"Domain unreachable: {url} - {e}")
             return []
     
+    async def _convert_jobs_data_with_company_info(
+        self, 
+        jobs_data: list[dict], 
+        url: str, 
+        careers_url: str,
+        domain: str
+    ) -> list[Job]:
+        """Convert raw job data to Job objects with translation + extract company info in parallel.
+        
+        Runs two LLM calls in parallel:
+        1. Translate job titles to English
+        2. Extract company info from main page (if not cached)
+        
+        Args:
+            jobs_data: Raw job dictionaries
+            url: Original URL
+            careers_url: Career page URL (for fallback)
+            domain: Domain for company info extraction
+            
+        Returns:
+            List of Job objects
+        """
+        import asyncio
+        
+        if not jobs_data:
+            # Still extract company info even if no jobs
+            if self.use_cache and self._repository:
+                await self._extract_and_save_company_info(domain)
+            return []
+        
+        self._update_status("Перевожу вакансии...")
+        
+        # Prepare parallel tasks
+        titles = [job_data.get("title", "Unknown Position") for job_data in jobs_data]
+        
+        # Task 1: Translate job titles
+        translate_task = self.llm.translate_job_titles(titles)
+        
+        # Task 2: Extract company info (if caching enabled and not yet extracted)
+        company_info_task = self._extract_and_save_company_info(domain) if self.use_cache and self._repository else None
+        
+        # Run in parallel
+        if company_info_task:
+            titles_en, _ = await asyncio.gather(translate_task, company_info_task)
+        else:
+            titles_en = await translate_task
+
+        # Convert to Job models
+        jobs = []
+        company_name = self._extract_company_name(url)
+        
+        for idx, job_data in enumerate(jobs_data):
+            job = Job(
+                id=f"web-{urlparse(url).netloc}-{idx}",
+                title=job_data.get("title", "Unknown Position"),
+                company=company_name,
+                location=job_data.get("location", "Unknown"),
+                url=job_data.get("url", careers_url),
+                source=f"website:{urlparse(url).netloc}",
+                title_en=titles_en[idx] if idx < len(titles_en) else None,
+                description=job_data.get("description"),
+            )
+            jobs.append(job)
+
+        return jobs
+
+    async def _extract_and_save_company_info(self, domain: str) -> None:
+        """Extract company info from main page and save to database.
+        
+        Skips if company already has description.
+        """
+        if not self._repository:
+            return
+            
+        try:
+            # Check if site exists and already has description
+            site = await self._repository.get_site_by_domain(domain)
+            if site and site.description:
+                return  # Already has description
+            
+            # Fetch main page and extract company info
+            main_page_url = f"https://{domain}"
+            html = await self._fetch(main_page_url)
+            if html:
+                description = await self.llm.extract_company_info(html, main_page_url)
+                if description:
+                    # Get or create site first
+                    company_name = self._extract_company_name(main_page_url)
+                    site = await self._repository.get_or_create_site(domain, company_name)
+                    await self._repository.update_site_description(site.id, description)
+                    logger.info(f"Extracted company info for {domain}: {description[:50]}...")
+        except Exception as e:
+            logger.warning(f"Failed to extract company info for {domain}: {e}")
+
     async def _convert_jobs_data(
         self, 
         jobs_data: list[dict], 

@@ -471,9 +471,8 @@ class BrowserLoader:
                                     await job_link.click(force=True)
                                 await page.wait_for_timeout(2500)
                                 final_url = page.url
-                                
-                                if is_external_job_board(final_url):
-                                    break
+                                # Successfully navigated - no need to retry
+                                break
                         except Exception as e:
                             logger.debug(f"Click failed: {e}")
                     else:
