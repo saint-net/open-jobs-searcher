@@ -17,6 +17,7 @@ from src.searchers.job_boards.workable import WorkableParser
 from src.searchers.job_boards.greenhouse import GreenhouseParser
 from src.searchers.job_boards.odoo import OdooParser
 from src.searchers.job_boards.hrworks import HRworksParser
+from src.searchers.job_boards.hibob import HiBobParser
 
 
 # Path to fixtures
@@ -682,6 +683,151 @@ class Test711mediaPlatformDetection:
         # TYPO3 extension paths
         assert "typo3conf/ext/" in html
         assert "typo3temp/" in html
+
+
+class TestHiBobParser:
+    """Tests for HiBob job board parser."""
+
+    def test_extracts_all_jobs(self):
+        """Should extract all jobs from HiBob HTML."""
+        html = load_fixture("hibob_jobs.html")
+        soup = make_soup(html)
+        parser = HiBobParser()
+
+        jobs = parser.parse(soup, "https://company.careers.hibob.com/jobs")
+
+        assert len(jobs) == 4
+
+    def test_extracts_titles(self):
+        """Should extract job titles correctly."""
+        html = load_fixture("hibob_jobs.html")
+        soup = make_soup(html)
+        parser = HiBobParser()
+
+        jobs = parser.parse(soup, "https://company.careers.hibob.com/jobs")
+        titles = [j["title"] for j in jobs]
+
+        assert "Senior Software Engineer (f/m/x)" in titles
+        assert "Product Manager (f/m/d)" in titles
+        assert "DevOps Engineer (m/w/d)" in titles
+        assert "Marketing Lead (f/m/x)" in titles
+
+    def test_extracts_locations(self):
+        """Should extract locations from HiBob format."""
+        html = load_fixture("hibob_jobs.html")
+        soup = make_soup(html)
+        parser = HiBobParser()
+
+        jobs = parser.parse(soup, "https://company.careers.hibob.com/jobs")
+        locations = [j["location"] for j in jobs]
+
+        # Should extract location keywords
+        assert any("Germany" in loc or "Remote" in loc for loc in locations)
+        assert any("Munich" in loc for loc in locations)
+        assert any("Berlin" in loc for loc in locations)
+
+    def test_extracts_departments(self):
+        """Should extract departments from HiBob format."""
+        html = load_fixture("hibob_jobs.html")
+        soup = make_soup(html)
+        parser = HiBobParser()
+
+        jobs = parser.parse(soup, "https://company.careers.hibob.com/jobs")
+        departments = [j["department"] for j in jobs if j.get("department")]
+
+        assert "Dev" in departments
+        assert "Product" in departments
+        assert "Infrastructure" in departments
+        assert "Marketing" in departments
+
+    def test_generates_urls(self):
+        """Should generate URLs from job titles."""
+        html = load_fixture("hibob_jobs.html")
+        soup = make_soup(html)
+        parser = HiBobParser()
+
+        jobs = parser.parse(soup, "https://company.careers.hibob.com/jobs")
+
+        # All jobs should have URLs
+        for job in jobs:
+            assert job["url"].startswith("https://company.careers.hibob.com/jobs/")
+
+    def test_platform_name(self):
+        """Should have correct platform name."""
+        parser = HiBobParser()
+        assert parser.platform_name == "hibob"
+
+    def test_empty_html(self):
+        """Should handle empty HTML gracefully."""
+        soup = make_soup("<html><body></body></html>")
+        parser = HiBobParser()
+
+        jobs = parser.parse(soup, "https://company.careers.hibob.com/jobs")
+
+        assert jobs == []
+
+
+class TestHiBobDetection:
+    """Tests for HiBob platform detection."""
+
+    def test_detects_hibob_url(self):
+        """Should detect HiBob from URL pattern."""
+        from src.searchers.job_boards.detector import detect_job_board_platform
+
+        platform = detect_job_board_platform("https://company.careers.hibob.com/jobs")
+
+        assert platform == "hibob"
+
+    def test_normalizes_hibob_url(self):
+        """Should normalize HiBob URL to /jobs."""
+        from src.searchers.job_boards.detector import _normalize_job_board_url
+
+        url = _normalize_job_board_url(
+            "https://company.careers.hibob.com/",
+            platform="hibob"
+        )
+
+        assert url == "https://company.careers.hibob.com/jobs"
+
+
+@pytest.mark.e2e
+class TestHiBobLive:
+    """E2E tests against real HiBob site.
+    
+    Run with: pytest -m e2e tests/test_job_board_parsers.py -v
+    """
+
+    @pytest.mark.asyncio
+    async def test_hibob_live_parsing(self):
+        """Smoke test: HiBob parser works on real site."""
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            page = await browser.new_page()
+            
+            await page.goto(
+                "https://stakingfacili-62c6a8.careers.hibob.com/jobs",
+                wait_until="networkidle",
+                timeout=30000
+            )
+            await page.wait_for_timeout(2000)
+            
+            html = await page.content()
+            await browser.close()
+        
+        soup = make_soup(html)
+        parser = HiBobParser()
+        jobs = parser.parse(soup, "https://stakingfacili-62c6a8.careers.hibob.com/jobs")
+        
+        # Проверяем что парсер находит вакансии (не конкретное число!)
+        assert len(jobs) > 0, "HiBob parser should find at least one job"
+        
+        # Проверяем структуру
+        for job in jobs:
+            assert job.get("title"), "Job should have title"
+            assert job.get("url"), "Job should have URL"
+            assert job.get("location"), "Job should have location"
 
 
 # Run with: pytest tests/test_job_board_parsers.py -v

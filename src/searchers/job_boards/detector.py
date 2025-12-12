@@ -24,6 +24,7 @@ EXTERNAL_JOB_BOARDS = [
     (r'\.factorial\.co/job_posting', 'factorial'),
     (r'\.pi-asp\.de/bewerber-web', 'pi-asp'),
     (r'job\.deloitte\.com', 'deloitte'),
+    (r'\.careers\.hibob\.com', 'hibob'),
 ]
 
 # URLs to skip when looking for job boards (privacy, imprint, etc.)
@@ -100,8 +101,15 @@ def _normalize_job_board_url(url: str, platform: str = None) -> str:
     - https://boards.greenhouse.io/company/jobs/123 -> https://boards.greenhouse.io/company
     - https://apply.workable.com/company/gdpr_policy -> https://apply.workable.com/company/
     - https://job.deloitte.com/search?search=27pilots -> https://job.deloitte.com/search?search=27pilots (keep as-is)
+    - https://company.careers.hibob.com/ -> https://company.careers.hibob.com/jobs (add /jobs)
     """
     parsed = urlparse(url)
+    
+    # Handle HiBob URLs - always go to /jobs
+    if platform == 'hibob' or 'careers.hibob.com' in parsed.netloc:
+        # HiBob main page doesn't show jobs, need to go to /jobs
+        base = f"{parsed.scheme}://{parsed.netloc}"
+        return f"{base}/jobs"
     
     # Handle Greenhouse URLs - keep company slug
     if platform == 'greenhouse' or 'greenhouse.io' in parsed.netloc:
@@ -197,7 +205,8 @@ def find_external_job_board(html: str) -> Optional[str]:
     # (e.g., Greenhouse /company/jobs/123 -> /company)
     # (e.g., Personio /job/123 -> /)
     # (e.g., Workable /company/gdpr_policy -> /company)
-    normalize_platforms = {'greenhouse', 'personio', 'workable'}
+    # (e.g., HiBob / -> /jobs)
+    normalize_platforms = {'greenhouse', 'personio', 'workable', 'hibob'}
     
     # Collect unique normalized URLs per platform
     seen_normalized = set()

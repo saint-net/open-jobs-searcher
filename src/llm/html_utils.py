@@ -26,6 +26,48 @@ COOKIE_SELECTORS = [
     '[class*="CookieBot"]',
 ]
 
+# Selectors for non-job content to aggressively remove
+NON_JOB_SELECTORS = [
+    # Social and sharing
+    '[class*="social"]',
+    '[class*="share"]',
+    '[class*="follow"]',
+    '[id*="social"]',
+    # Team/testimonials/about sections
+    '[class*="team"]',
+    '[class*="testimonial"]',
+    '[class*="review"]',
+    '[class*="partner"]',
+    '[class*="client"]',
+    '[class*="customer"]',
+    '[id*="team"]',
+    '[id*="testimonial"]',
+    # Contact/newsletter
+    '[class*="newsletter"]',
+    '[class*="subscribe"]',
+    '[class*="contact-form"]',
+    '[id*="newsletter"]',
+    '[id*="contact-form"]',
+    # Breadcrumbs and misc
+    '[class*="breadcrumb"]',
+    '[class*="sidebar"]',
+    '[class*="widget"]',
+    '[class*="banner"]',
+    '[class*="popup"]',
+    '[class*="modal"]',
+    '[class*="overlay"]',
+    # Media galleries
+    '[class*="gallery"]',
+    '[class*="slider"]',
+    '[class*="carousel"]',
+    '[class*="swiper"]',
+    # Footer extras
+    '[class*="copyright"]',
+    '[class*="legal"]',
+    '[class*="imprint"]',
+    '[class*="impressum"]',
+]
+
 # Attributes to keep when cleaning HTML
 KEEP_ATTRS = {'href', 'class', 'id', 'role', 'data-job', 'data-position'}
 
@@ -121,14 +163,33 @@ def html_to_markdown(html: str, preserve_links: bool = True) -> str:
         except Exception:
             pass
     
+    # Aggressively remove non-job content (social, team, testimonials, etc.)
+    for selector in NON_JOB_SELECTORS:
+        try:
+            for element in soup.select(selector):
+                # Check if this element contains job content
+                text = element.get_text().lower()
+                has_job_markers = any(marker in text for marker in JOB_MARKERS)
+                # Only remove if no job markers found
+                if not has_job_markers:
+                    element.decompose()
+        except Exception:
+            pass
+    
     # Remove comments
     for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
         comment.extract()
     
-    # Strip inline styles from all elements
+    # Strip inline styles and data attributes from all elements
     for tag in soup.find_all(True):
-        if 'style' in tag.attrs:
-            del tag.attrs['style']
+        attrs_to_remove = [k for k in tag.attrs if k.startswith('data-') or k == 'style']
+        for attr in attrs_to_remove:
+            del tag.attrs[attr]
+    
+    # Remove empty divs/spans that add noise
+    for tag in soup.find_all(['div', 'span', 'p']):
+        if not tag.get_text(strip=True) and not tag.find_all(['a', 'img']):
+            tag.decompose()
     
     # Remove navigation, header, footer using marker density heuristic
     for tag in soup.find_all(['nav', 'header', 'footer', 'aside']):
@@ -173,13 +234,48 @@ def html_to_markdown(html: str, preserve_links: bool = True) -> str:
     
     # Remove lines that are just whitespace
     lines = [line for line in markdown.split('\n') if line.strip()]
-    markdown = '\n'.join(lines)
+    
+    # Filter out boilerplate lines
+    filtered_lines = []
+    for line in lines:
+        line_lower = line.lower().strip()
+        # Skip common boilerplate patterns
+        if any([
+            line_lower.startswith('©'),
+            line_lower.startswith('copyright'),
+            line_lower.startswith('all rights reserved'),
+            line_lower.startswith('privacy policy'),
+            line_lower.startswith('terms of'),
+            line_lower.startswith('cookie'),
+            line_lower.startswith('datenschutz'),
+            line_lower.startswith('impressum'),
+            line_lower.startswith('follow us'),
+            line_lower.startswith('connect with'),
+            len(line_lower) < 3,  # Very short lines (noise)
+        ]):
+            continue
+        # Skip lines with only special characters
+        if re.match(r'^[\s\-_=*#|]+$', line):
+            continue
+        filtered_lines.append(line)
+    
+    markdown = '\n'.join(filtered_lines)
     
     # Remove excessive whitespace within lines
     markdown = re.sub(r'[ \t]+', ' ', markdown)
     
     # Remove empty links like [](url) or [ ](url)
     markdown = re.sub(r'\[\s*\]\([^)]+\)', '', markdown)
+    
+    # Remove duplicate consecutive lines (common in converted HTML)
+    lines = markdown.split('\n')
+    deduped = []
+    prev_line = None
+    for line in lines:
+        if line.strip() != prev_line:
+            deduped.append(line)
+            prev_line = line.strip()
+    markdown = '\n'.join(deduped)
     
     # Strip links if not needed (further reduces size)
     if not preserve_links:

@@ -192,6 +192,10 @@ class JobExtractor:
             if known_platform:
                 logger.debug(f"Known job board platform: {known_platform}, skipping navigation")
                 should_navigate = False
+                # HiBob needs /jobs path - main page doesn't show job list
+                if known_platform == 'hibob' and not careers_url.rstrip('/').endswith('/jobs'):
+                    careers_url = careers_url.rstrip('/') + '/jobs'
+                    logger.debug(f"HiBob: redirecting to jobs page: {careers_url}")
             else:
                 # Check if URL already points to a jobs listing page
                 # If so, don't navigate further (we're already there!)
