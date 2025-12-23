@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 EXTERNAL_JOB_BOARDS = [
     (r'\.jobs\.personio\.(?:de|com)', 'personio'),
     (r'boards\.greenhouse\.io', 'greenhouse'),
+    (r'job-boards\.greenhouse\.io', 'greenhouse'),
     (r'jobs\.lever\.co', 'lever'),
     (r'\.workable\.com', 'workable'),
     (r'\.breezy\.hr', 'breezy'),
@@ -25,6 +26,11 @@ EXTERNAL_JOB_BOARDS = [
     (r'\.pi-asp\.de/bewerber-web', 'pi-asp'),
     (r'job\.deloitte\.com', 'deloitte'),
     (r'\.careers\.hibob\.com', 'hibob'),
+    # German/DACH popular platforms
+    (r'\.softgarden\.io', 'softgarden'),
+    (r'jobdb\.softgarden\.de', 'softgarden'),
+    (r'join\.com/companies/', 'join'),
+    (r'join\.com/[^/]+/jobs', 'join'),
 ]
 
 # URLs to skip when looking for job boards (privacy, imprint, etc.)
@@ -72,13 +78,25 @@ def _detect_platform_from_html(html: str) -> Optional[str]:
     Some platforms (like Talention) don't have distinctive URLs
     but can be identified by their HTML structure/markers.
     """
+    html_lower = html.lower()
+    
     # Talention markers
-    if 'talention' in html.lower() or 'data-talention' in html.lower():
+    if 'talention' in html_lower or 'data-talention' in html_lower:
         return 'talention'
     
     # HRworks markers  
-    if 'hrworks' in html.lower() or 'data-hrworks' in html.lower():
+    if 'hrworks' in html_lower or 'data-hrworks' in html_lower:
         return 'hrworks'
+    
+    # Join.com widget markers
+    if 'join-jobs-widget' in html_lower or 'data-join' in html_lower:
+        return 'join'
+    if 'join.com/companies/' in html_lower or 'join.com/widget' in html_lower:
+        return 'join'
+    
+    # Softgarden markers
+    if 'softgarden' in html_lower and ('job-' in html_lower or 'vacancy' in html_lower):
+        return 'softgarden'
     
     return None
 
@@ -134,6 +152,21 @@ def _normalize_job_board_url(url: str, platform: str = None) -> str:
     if platform == 'deloitte' or 'deloitte.com' in parsed.netloc:
         # Keep the full URL with search parameters
         return url
+    
+    # Handle Softgarden URLs - strip job ID, keep base
+    if platform == 'softgarden' or 'softgarden' in parsed.netloc:
+        # Path like /job/123 -> /
+        # company.softgarden.io stays as-is
+        return f"{parsed.scheme}://{parsed.netloc}/"
+    
+    # Handle Join.com URLs - keep company path
+    if platform == 'join' or 'join.com' in parsed.netloc:
+        # Path like /companies/company-name/jobs/123 -> /companies/company-name
+        path_parts = parsed.path.strip('/').split('/')
+        if len(path_parts) >= 2 and path_parts[0] == 'companies':
+            company_slug = path_parts[1]
+            return f"{parsed.scheme}://{parsed.netloc}/companies/{company_slug}"
+        return f"{parsed.scheme}://{parsed.netloc}/"
     
     # For other platforms, keep only language parameter if present
     query_params = parsed.query
@@ -206,7 +239,9 @@ def find_external_job_board(html: str) -> Optional[str]:
     # (e.g., Personio /job/123 -> /)
     # (e.g., Workable /company/gdpr_policy -> /company)
     # (e.g., HiBob / -> /jobs)
-    normalize_platforms = {'greenhouse', 'personio', 'workable', 'hibob'}
+    # (e.g., Softgarden /job/123 -> /)
+    # (e.g., Join /companies/company/jobs/123 -> /companies/company)
+    normalize_platforms = {'greenhouse', 'personio', 'workable', 'hibob', 'softgarden', 'join'}
     
     # Collect unique normalized URLs per platform
     seen_normalized = set()

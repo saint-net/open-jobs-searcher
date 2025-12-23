@@ -18,6 +18,8 @@ from src.searchers.job_boards.greenhouse import GreenhouseParser
 from src.searchers.job_boards.odoo import OdooParser
 from src.searchers.job_boards.hrworks import HRworksParser
 from src.searchers.job_boards.hibob import HiBobParser
+from src.searchers.job_boards.softgarden import SoftgardenParser
+from src.searchers.job_boards.join import JoinParser
 
 
 # Path to fixtures
@@ -828,6 +830,247 @@ class TestHiBobLive:
             assert job.get("title"), "Job should have title"
             assert job.get("url"), "Job should have URL"
             assert job.get("location"), "Job should have location"
+
+
+class TestSoftgardenParser:
+    """Tests for Softgarden job board parser."""
+    
+    def test_extracts_all_jobs(self):
+        """Should extract all jobs from Softgarden HTML."""
+        html = load_fixture("softgarden_jobs.html")
+        soup = make_soup(html)
+        parser = SoftgardenParser()
+        
+        jobs = parser.parse(soup, "https://company.softgarden.io")
+        
+        # Should have 5 jobs (Initiativbewerbung not filtered by parse())
+        assert len(jobs) == 6
+    
+    def test_extracts_titles(self):
+        """Should extract job titles correctly."""
+        html = load_fixture("softgarden_jobs.html")
+        soup = make_soup(html)
+        parser = SoftgardenParser()
+        
+        jobs = parser.parse(soup, "https://company.softgarden.io")
+        titles = [j["title"] for j in jobs]
+        
+        assert "Senior Software Developer (m/w/d)" in titles
+        assert "Product Manager (m/w/d)" in titles
+        assert "DevOps Engineer (m/w/d)" in titles
+        assert "HR Manager" in titles  # "(all genders)" should be removed
+        assert "Marketing Specialist (m/w/d)" in titles
+    
+    def test_extracts_locations(self):
+        """Should extract locations from job cards."""
+        html = load_fixture("softgarden_jobs.html")
+        soup = make_soup(html)
+        parser = SoftgardenParser()
+        
+        jobs = parser.parse(soup, "https://company.softgarden.io")
+        
+        berlin_job = next(j for j in jobs if "Senior Software" in j["title"])
+        assert berlin_job["location"] == "Berlin"
+        
+        remote_job = next(j for j in jobs if "DevOps" in j["title"])
+        assert remote_job["location"] == "Remote"
+    
+    def test_extracts_departments(self):
+        """Should extract departments from Softgarden cards."""
+        html = load_fixture("softgarden_jobs.html")
+        soup = make_soup(html)
+        parser = SoftgardenParser()
+        
+        jobs = parser.parse(soup, "https://company.softgarden.io")
+        
+        dev_job = next(j for j in jobs if "Senior Software" in j["title"])
+        assert dev_job["department"] == "Engineering"
+        
+        marketing_job = next(j for j in jobs if "Marketing" in j["title"])
+        assert marketing_job["department"] == "Marketing"
+    
+    def test_extracts_urls(self):
+        """Should extract job URLs."""
+        html = load_fixture("softgarden_jobs.html")
+        soup = make_soup(html)
+        parser = SoftgardenParser()
+        
+        jobs = parser.parse(soup, "https://company.softgarden.io")
+        
+        # Jobs should have /job/ or /vacancies/ in URL
+        job_pattern_jobs = [j for j in jobs if "/job/" in j["url"]]
+        vacancy_pattern_jobs = [j for j in jobs if "/vacancies/" in j["url"]]
+        
+        assert len(job_pattern_jobs) + len(vacancy_pattern_jobs) == len(jobs)
+    
+    def test_parse_and_filter_removes_initiativbewerbung(self):
+        """Should filter out Initiativbewerbung when using parse_and_filter."""
+        html = load_fixture("softgarden_jobs.html")
+        soup = make_soup(html)
+        parser = SoftgardenParser()
+        
+        # Raw parse includes Initiativbewerbung
+        all_jobs = parser.parse(soup, "https://company.softgarden.io")
+        assert any("Initiativbewerbung" in j["title"] for j in all_jobs)
+        
+        # Filtered parse removes it
+        filtered_jobs = parser.parse_and_filter(soup, "https://company.softgarden.io")
+        assert not any("Initiativbewerbung" in j["title"] for j in filtered_jobs)
+        assert len(filtered_jobs) == 5
+    
+    def test_platform_name(self):
+        """Should have correct platform name."""
+        parser = SoftgardenParser()
+        assert parser.platform_name == "softgarden"
+    
+    def test_empty_html(self):
+        """Should handle empty HTML gracefully."""
+        soup = make_soup("<html><body></body></html>")
+        parser = SoftgardenParser()
+        
+        jobs = parser.parse(soup, "https://company.softgarden.io")
+        
+        assert jobs == []
+
+
+class TestJoinParser:
+    """Tests for Join.com job board parser."""
+    
+    def test_extracts_all_jobs(self):
+        """Should extract all jobs from Join.com widget HTML."""
+        html = load_fixture("join_jobs.html")
+        soup = make_soup(html)
+        parser = JoinParser()
+        
+        jobs = parser.parse(soup, "https://techstartup.de/karriere")
+        
+        # Should have 3 jobs from widget (link outside widget handled separately)
+        assert len(jobs) >= 3
+    
+    def test_extracts_titles(self):
+        """Should extract job titles correctly."""
+        html = load_fixture("join_jobs.html")
+        soup = make_soup(html)
+        parser = JoinParser()
+        
+        jobs = parser.parse(soup, "https://techstartup.de/karriere")
+        titles = [j["title"] for j in jobs]
+        
+        assert "Frontend Developer (m/w/d)" in titles
+        assert "Backend Engineer (m/w/d)" in titles
+        assert "Data Scientist (m/w/d)" in titles
+    
+    def test_extracts_locations(self):
+        """Should extract locations from widget cards."""
+        html = load_fixture("join_jobs.html")
+        soup = make_soup(html)
+        parser = JoinParser()
+        
+        jobs = parser.parse(soup, "https://techstartup.de/karriere")
+        
+        frontend_job = next(j for j in jobs if "Frontend" in j["title"])
+        assert frontend_job["location"] == "Berlin"
+        
+        data_job = next(j for j in jobs if "Data" in j["title"])
+        assert data_job["location"] == "Remote"
+    
+    def test_extracts_urls(self):
+        """Should extract Join.com job URLs."""
+        html = load_fixture("join_jobs.html")
+        soup = make_soup(html)
+        parser = JoinParser()
+        
+        jobs = parser.parse(soup, "https://techstartup.de/karriere")
+        
+        # All jobs should have join.com URLs
+        for job in jobs:
+            assert "join.com" in job["url"]
+            assert "/jobs/" in job["url"]
+    
+    def test_platform_name(self):
+        """Should have correct platform name."""
+        parser = JoinParser()
+        assert parser.platform_name == "join"
+    
+    def test_empty_html(self):
+        """Should handle empty HTML gracefully."""
+        soup = make_soup("<html><body></body></html>")
+        parser = JoinParser()
+        
+        jobs = parser.parse(soup, "https://example.com")
+        
+        assert jobs == []
+
+
+class TestSoftgardenDetection:
+    """Tests for Softgarden platform detection."""
+    
+    def test_detects_softgarden_io_url(self):
+        """Should detect Softgarden from *.softgarden.io URL."""
+        from src.searchers.job_boards.detector import detect_job_board_platform
+        
+        platform = detect_job_board_platform("https://company.softgarden.io/jobs")
+        
+        assert platform == "softgarden"
+    
+    def test_detects_softgarden_de_url(self):
+        """Should detect Softgarden from jobdb.softgarden.de URL."""
+        from src.searchers.job_boards.detector import detect_job_board_platform
+        
+        platform = detect_job_board_platform("https://jobdb.softgarden.de/company")
+        
+        assert platform == "softgarden"
+    
+    def test_normalizes_softgarden_url(self):
+        """Should normalize Softgarden URL to base."""
+        from src.searchers.job_boards.detector import _normalize_job_board_url
+        
+        url = _normalize_job_board_url(
+            "https://company.softgarden.io/job/12345",
+            platform="softgarden"
+        )
+        
+        assert url == "https://company.softgarden.io/"
+
+
+class TestJoinDetection:
+    """Tests for Join.com platform detection."""
+    
+    def test_detects_join_companies_url(self):
+        """Should detect Join.com from companies URL."""
+        from src.searchers.job_boards.detector import detect_job_board_platform
+        
+        platform = detect_job_board_platform("https://join.com/companies/techstartup")
+        
+        assert platform == "join"
+    
+    def test_detects_join_jobs_url(self):
+        """Should detect Join.com from jobs URL."""
+        from src.searchers.job_boards.detector import detect_job_board_platform
+        
+        platform = detect_job_board_platform("https://join.com/companies/techstartup/jobs/developer")
+        
+        assert platform == "join"
+    
+    def test_detects_join_widget_in_html(self):
+        """Should detect Join.com widget from HTML markers."""
+        from src.searchers.job_boards.detector import detect_job_board_platform
+        
+        html = '<div class="join-jobs-widget" data-join="config">Jobs</div>'
+        platform = detect_job_board_platform("https://example.com/karriere", html)
+        
+        assert platform == "join"
+    
+    def test_normalizes_join_url(self):
+        """Should normalize Join.com URL to company page."""
+        from src.searchers.job_boards.detector import _normalize_job_board_url
+        
+        url = _normalize_job_board_url(
+            "https://join.com/companies/techstartup/jobs/developer-123",
+            platform="join"
+        )
+        
+        assert url == "https://join.com/companies/techstartup"
 
 
 # Run with: pytest tests/test_job_board_parsers.py -v
