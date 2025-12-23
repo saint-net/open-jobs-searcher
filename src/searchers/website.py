@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from src.models import Job
 from src.searchers.base import BaseSearcher
 from src.searchers.http_client import AsyncHttpClient
+from src.searchers.rate_limiter import RateLimiter
 from src.searchers.page_fetcher import PageFetcher
 from src.searchers.url_discovery import CareerUrlDiscovery
 from src.searchers.job_boards import (
@@ -63,8 +64,21 @@ class WebsiteSearcher(BaseSearcher):
         # Status callback for progress updates
         self._status_callback = None
 
+        # Initialize rate limiter from config
+        from src.config import settings
+        self.rate_limiter = None
+        if settings.rate_limit_enabled:
+            self.rate_limiter = RateLimiter(
+                base_delay=settings.rate_limit_delay,
+                max_concurrent=settings.rate_limit_max_concurrent,
+            )
+            logger.debug(
+                f"Rate limiting enabled: {settings.rate_limit_delay}s delay, "
+                f"{settings.rate_limit_max_concurrent} concurrent per domain"
+            )
+
         # Initialize components
-        self.http_client = AsyncHttpClient()
+        self.http_client = AsyncHttpClient(rate_limiter=self.rate_limiter)
         self.page_fetcher = PageFetcher(
             http_client=self.http_client,
             headless=headless,

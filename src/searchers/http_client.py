@@ -1,12 +1,15 @@
-"""Async HTTP client with retry, connection pooling, and domain availability checks."""
+"""Async HTTP client with retry, connection pooling, rate limiting, and domain availability checks."""
 
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.browser import DomainUnreachableError
+
+if TYPE_CHECKING:
+    from src.searchers.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +54,16 @@ class AsyncHttpClient:
         timeout: float = 30.0,
         headers: Optional[dict] = None,
         pool_limits: Optional[httpx.Limits] = None,
+        rate_limiter: Optional["RateLimiter"] = None,
     ):
         """
-        Initialize HTTP client with connection pooling.
+        Initialize HTTP client with connection pooling and rate limiting.
         
         Args:
             timeout: Request timeout in seconds
             headers: Custom HTTP headers
             pool_limits: Connection pool limits (uses defaults if not provided)
+            rate_limiter: Optional rate limiter for per-domain throttling
         """
         default_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -71,6 +76,7 @@ class AsyncHttpClient:
         self._headers = default_headers
         self._timeout = timeout
         self._pool_limits = pool_limits or DEFAULT_POOL_LIMITS
+        self._rate_limiter = rate_limiter
         
         # Main client with SSL verification and connection pooling
         self.client = httpx.AsyncClient(
@@ -115,7 +121,7 @@ class AsyncHttpClient:
 
     async def fetch(self, url: str) -> Optional[str]:
         """
-        Fetch HTML content from URL.
+        Fetch HTML content from URL with rate limiting.
         
         Args:
             url: URL to fetch
@@ -126,11 +132,38 @@ class AsyncHttpClient:
         Raises:
             DomainUnreachableError: If domain cannot be reached
         """
+        return await self._fetch_with_rate_limit(url)
+    
+    async def _fetch_with_rate_limit(self, url: str, use_insecure: bool = False) -> Optional[str]:
+        """Internal fetch with rate limiting support."""
         try:
-            response = await self._fetch_with_retry(url)
-            return response.text
+            # Apply rate limiting if configured
+            if self._rate_limiter:
+                async with await self._rate_limiter.acquire(url):
+                    response = await self._do_fetch(url, use_insecure)
+                    if response:
+                        # Update rate limiter based on response
+                        self._rate_limiter.on_response(
+                            response.status_code, 
+                            url, 
+                            dict(response.headers)
+                        )
+                    return response.text if response else None
+            else:
+                response = await self._do_fetch(url, use_insecure)
+                return response.text if response else None
         except httpx.HTTPStatusError as e:
-            logger.debug(f"HTTP error {e.response.status_code} for {url}")
+            status = e.response.status_code
+            logger.debug(f"HTTP error {status} for {url}")
+            
+            # Handle rate limiting
+            if status in (429, 503) and self._rate_limiter:
+                retry_after = self._rate_limiter.on_response(
+                    status, url, dict(e.response.headers)
+                )
+                if retry_after:
+                    logger.info(f"Rate limited, waiting {retry_after}s before retry")
+            
             return None
         except httpx.ConnectError as e:
             error_str = str(e).lower()
@@ -138,32 +171,31 @@ class AsyncHttpClient:
             if any(err in error_str for err in self.CONNECTION_ERROR_PATTERNS):
                 raise DomainUnreachableError(f"Домен недоступен: {url}") from e
             # Retry with disabled SSL verification for certificate errors
-            if self._is_ssl_error(e):
+            if self._is_ssl_error(e) and not use_insecure:
                 logger.debug(f"SSL error for {url}, retrying without verification")
-                try:
-                    response = await self._fetch_with_retry(url, use_insecure=True)
-                    return response.text
-                except Exception as retry_error:
-                    logger.warning(f"SSL retry also failed for {url}: {retry_error}")
-                    return None
+                return await self._fetch_with_rate_limit(url, use_insecure=True)
             logger.warning(f"Connection error for {url}: {e}")
             return None
         except httpx.RequestError as e:
             # Check for SSL errors wrapped in RequestError
-            if self._is_ssl_error(e):
+            if self._is_ssl_error(e) and not use_insecure:
                 logger.debug(f"SSL error for {url}, retrying without verification")
-                try:
-                    response = await self._fetch_with_retry(url, use_insecure=True)
-                    return response.text
-                except Exception as retry_error:
-                    logger.warning(f"SSL retry also failed for {url}: {retry_error}")
-                    return None
+                return await self._fetch_with_rate_limit(url, use_insecure=True)
             logger.warning(f"Request failed after retries for {url}: {e}")
             return None
+    
+    async def _do_fetch(self, url: str, use_insecure: bool = False) -> Optional[httpx.Response]:
+        """Perform the actual HTTP fetch."""
+        try:
+            return await self._fetch_with_retry(url, use_insecure)
+        except httpx.HTTPStatusError:
+            raise  # Re-raise for handling in caller
+        except httpx.RequestError:
+            raise  # Re-raise for handling in caller
 
     async def fetch_response(self, url: str) -> Optional[httpx.Response]:
         """
-        Fetch response object from URL (for accessing status, headers, etc.).
+        Fetch response object from URL with rate limiting.
         
         Args:
             url: URL to fetch
@@ -171,17 +203,31 @@ class AsyncHttpClient:
         Returns:
             Response object or None on error
         """
+        return await self._fetch_response_with_rate_limit(url)
+    
+    async def _fetch_response_with_rate_limit(
+        self, url: str, use_insecure: bool = False
+    ) -> Optional[httpx.Response]:
+        """Internal fetch_response with rate limiting support."""
         try:
-            return await self._fetch_with_retry(url)
-        except (httpx.HTTPStatusError, httpx.RequestError) as e:
-            # Retry with disabled SSL verification for certificate errors
-            if self._is_ssl_error(e):
+            if self._rate_limiter:
+                async with await self._rate_limiter.acquire(url):
+                    response = await self._fetch_with_retry(url, use_insecure)
+                    self._rate_limiter.on_response(
+                        response.status_code, url, dict(response.headers)
+                    )
+                    return response
+            else:
+                return await self._fetch_with_retry(url, use_insecure)
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            if status in (429, 503) and self._rate_limiter:
+                self._rate_limiter.on_response(status, url, dict(e.response.headers))
+            return None
+        except httpx.RequestError as e:
+            if self._is_ssl_error(e) and not use_insecure:
                 logger.debug(f"SSL error for {url}, retrying without verification")
-                try:
-                    return await self._fetch_with_retry(url, use_insecure=True)
-                except Exception as retry_error:
-                    logger.debug(f"SSL retry also failed for {url}: {retry_error}")
-                    return None
+                return await self._fetch_response_with_rate_limit(url, use_insecure=True)
             logger.debug(f"Fetch failed for {url}: {e}")
             return None
 

@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     # OpenRouter
     openrouter_api_key: str = Field(default="", description="OpenRouter API ключ")
 
+    # Rate limiting (защита от банов при массовом сканировании)
+    rate_limit_delay: float = Field(
+        default=0.5, description="Минимальная задержка между запросами к одному домену (секунды)"
+    )
+    rate_limit_max_concurrent: int = Field(
+        default=2, description="Максимум параллельных запросов к одному домену"
+    )
+    rate_limit_enabled: bool = Field(
+        default=True, description="Включить rate limiting"
+    )
+
 
 settings = Settings()
 

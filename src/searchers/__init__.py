@@ -6,6 +6,7 @@ from .website import WebsiteSearcher
 from .stepstone import StepStoneSearcher
 from .karriere import KarriereATSearcher
 from .http_client import AsyncHttpClient
+from .rate_limiter import RateLimiter
 from .url_discovery import CareerUrlDiscovery
 from .page_fetcher import PageFetcher
 from .job_converter import JobConverter, extract_company_name
@@ -18,6 +19,7 @@ __all__ = [
     "StepStoneSearcher",
     "KarriereATSearcher",
     "AsyncHttpClient",
+    "RateLimiter",
     "CareerUrlDiscovery",
     "PageFetcher",
     "JobConverter",
