@@ -1,11 +1,9 @@
-"""Simplified job extractor: Schema.org + LLM.
+"""Simplified job extractor: Schema.org + PDF + LLM.
 
 Strategy:
 1. Try Schema.org structured data first (100% accuracy when available)
-2. If no Schema.org data, use LLM extraction (main method)
-
-This approach eliminates false positives from heuristic-based strategies
-(AccessibilityTree, KeywordMatch, ListStructure, GenderNotation).
+2. Extract PDF job links as supplement
+3. Use LLM extraction as main method for everything else
 """
 
 import logging

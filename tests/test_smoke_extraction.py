@@ -216,7 +216,7 @@ class TestJobCandidate:
         assert candidate.title == "Developer (m/w/d)"
         assert candidate.url == "https://example.com/job/1"
         assert candidate.location == "Unknown"  # Default
-        assert candidate.source == ExtractionSource.KEYWORD_MATCH  # Default
+        assert candidate.source == ExtractionSource.LLM  # Default
     
     def test_creates_with_all_fields(self):
         """Should create with all optional fields."""
@@ -274,11 +274,8 @@ class TestExtractionSource:
     def test_all_sources_defined(self):
         """All expected sources should be defined."""
         assert hasattr(ExtractionSource, 'SCHEMA_ORG')
+        assert hasattr(ExtractionSource, 'PDF_LINK')
         assert hasattr(ExtractionSource, 'LLM')
-        assert hasattr(ExtractionSource, 'KEYWORD_MATCH')
-        assert hasattr(ExtractionSource, 'GENDER_NOTATION')
-        assert hasattr(ExtractionSource, 'LIST_STRUCTURE')
-        assert hasattr(ExtractionSource, 'ACCESSIBILITY')
 
 
 class TestIsLikelyJobTitle:

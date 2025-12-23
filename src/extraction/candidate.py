@@ -8,23 +8,15 @@ import re
 
 class ExtractionSource(Enum):
     """Source of job extraction."""
-    SCHEMA_ORG = "schema_org"          # schema.org/JobPosting - highest confidence
-    PDF_LINK = "pdf_link"              # Job from PDF/document link filename
-    ACCESSIBILITY = "accessibility"     # Browser accessibility tree - high confidence
-    GENDER_NOTATION = "gender_notation" # (m/w/d) pattern
-    LIST_STRUCTURE = "list_structure"   # Detected from repeated HTML structure
-    KEYWORD_MATCH = "keyword_match"     # Job title keywords
-    LLM = "llm"                         # LLM extraction - fallback
+    SCHEMA_ORG = "schema_org"  # schema.org/JobPosting - highest confidence
+    PDF_LINK = "pdf_link"      # Job from PDF/document link filename
+    LLM = "llm"                # LLM extraction - main method
 
 
 # Base confidence scores by source
 SOURCE_CONFIDENCE = {
     ExtractionSource.SCHEMA_ORG: 0.95,
-    ExtractionSource.PDF_LINK: 0.90,  # High confidence - explicit job document links
-    ExtractionSource.ACCESSIBILITY: 0.90,  # High confidence - clean text from browser
-    ExtractionSource.GENDER_NOTATION: 0.85,
-    ExtractionSource.LIST_STRUCTURE: 0.60,
-    ExtractionSource.KEYWORD_MATCH: 0.50,
+    ExtractionSource.PDF_LINK: 0.90,
     ExtractionSource.LLM: 0.70,
 }
 
@@ -38,7 +30,7 @@ class JobCandidate:
     location: str = "Unknown"
     department: Optional[str] = None
     company: Optional[str] = None
-    source: ExtractionSource = ExtractionSource.KEYWORD_MATCH
+    source: ExtractionSource = ExtractionSource.LLM
     confidence: float = 0.5
     
     # Signals that contributed to confidence
