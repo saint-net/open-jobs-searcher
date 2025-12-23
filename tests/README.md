@@ -113,11 +113,11 @@ tests/
 - `html_to_markdown()` - конвертация HTML в Markdown для экономии токенов
 - `extract_json()` - парсинг JSON из ответов LLM
 - `extract_url()` - извлечение URL из текста
+- `find_job_section()` - поиск секции с вакансиями
 
 **job_extraction.py:**
 - `validate_jobs()` - валидация списка вакансий
 - `is_non_job_entry()` - фильтрация "не-вакансий" (Initiativbewerbung)
-- `find_job_section()` - поиск секции с вакансиями
 
 **url_discovery.py:**
 - `extract_links_from_html()` - извлечение ссылок

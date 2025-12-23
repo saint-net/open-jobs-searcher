@@ -77,6 +77,29 @@ RELEVANT_CLASS_KEYWORDS = ['job', 'career', 'position', 'vacancy', 'opening', 't
 # Job content markers for smart removal
 JOB_MARKERS = ['job', 'career', 'position', 'stelle', 'vacancy', 'opening', '(m/w/d)', '(m/f/d)', 'developer', 'engineer', 'manager']
 
+# CSS selectors for common job listing containers/widgets
+JOB_SECTION_SELECTORS = [
+    # Generic job containers (Odoo-specific handled by OdooParser)
+    '[class*="job-list"]',
+    '[class*="jobs-list"]',
+    '[class*="vacancies"]',
+    '[class*="career-list"]',
+    '[class*="openings"]',
+    '[id*="jobs"]',
+    '[id*="vacancies"]',
+    '[id*="careers"]',
+    # Join.com widget
+    '.join-jobs-widget',
+    '[class*="join-jobs"]',
+    # Personio
+    '.personio-jobs',
+    '[class*="personio"]',
+    # Main content with job-related text
+    'main',
+    'article',
+    '.content',
+]
+
 
 def clean_html(html: str) -> str:
     """
@@ -382,4 +405,60 @@ def extract_json(response: str) -> list | dict:
             pass
 
     return []
+
+
+def find_job_section(soup: BeautifulSoup) -> Optional[str]:
+    """Find the HTML section containing job listings.
+    
+    Many pages have job widgets at the end of large HTML documents.
+    This function finds the relevant section to avoid truncation issues.
+    
+    Strategy:
+    1. Check for Odoo CMS first (most reliable detection)
+    2. Try generic CSS selectors for job containers
+    
+    Args:
+        soup: BeautifulSoup object of the page
+        
+    Returns:
+        HTML string of job section, or None if not found
+    """
+    from src.constants import MIN_JOB_SECTION_SIZE, MAX_JOB_SECTION_SIZE
+    from src.searchers.job_boards.odoo import OdooParser
+    
+    # Check if this is an Odoo site first (most reliable detection)
+    if OdooParser.is_odoo_site(soup):
+        logger.debug("Detected Odoo site, using Odoo-specific selectors")
+        odoo_html = OdooParser.find_job_section(soup)
+        if odoo_html:
+            return odoo_html
+    
+    # Try generic selectors for other platforms
+    candidates = []
+    
+    for selector in JOB_SECTION_SELECTORS:
+        try:
+            elements = soup.select(selector)
+            valid_elements = []
+            for el in elements:
+                el_text = el.get_text().lower()
+                # Check if element contains job-related content
+                if any(marker in el_text for marker in JOB_MARKERS):
+                    html = str(el)
+                    if MIN_JOB_SECTION_SIZE < len(html) < MAX_JOB_SECTION_SIZE:
+                        valid_elements.append(html)
+            
+            if valid_elements:
+                combined_html = "\n<hr>\n".join(valid_elements)
+                if len(combined_html) > 1000:
+                    candidates.append((len(combined_html), combined_html))
+        except Exception:
+            continue
+            
+    # Sort candidates by size (descending) to prefer larger collections
+    if candidates:
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0][1]
+        
+    return None
 

@@ -8,7 +8,8 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, retry_if_result, before_sleep_log
 
-from src.constants import MAX_LLM_RETRIES, MIN_JOB_SECTION_SIZE, MAX_JOB_SECTION_SIZE
+from src.constants import MAX_LLM_RETRIES
+from src.llm.html_utils import find_job_section
 from src.models import JobDict, JobExtractionResult, JobExtractionSchema
 
 logger = logging.getLogger(__name__)
@@ -36,39 +37,6 @@ NON_JOB_PATTERNS = [
     r'blindbewerbung',  # German: Blind application
 ]
 
-# CSS selectors for common job listing containers/widgets
-JOB_SECTION_SELECTORS = [
-    # Odoo job widgets
-    '.oe_website_jobs',
-    '.o_website_hr_recruitment_jobs_list',
-    '[class*="website_jobs"]',
-    '[class*="hr_recruitment"]',
-    # Join.com widget
-    '.join-jobs-widget',
-    '[class*="join-jobs"]',
-    # Personio
-    '.personio-jobs',
-    '[class*="personio"]',
-    # Generic job containers
-    '[class*="job-list"]',
-    '[class*="jobs-list"]',
-    '[class*="vacancies"]',
-    '[class*="career-list"]',
-    '[class*="openings"]',
-    '[id*="jobs"]',
-    '[id*="vacancies"]',
-    '[id*="careers"]',
-    # Main content with job-related text
-    'main',
-    'article',
-    '.content',
-]
-
-# Job-related markers for content detection
-JOB_CONTENT_MARKERS = [
-    '(m/w/d)', '(m/f/d)', 'vollzeit', 'teilzeit', 
-    'job', 'position', 'stelle', 'develop', 'engineer', 'manager'
-]
 
 
 class LLMJobExtractor:
@@ -245,57 +213,6 @@ class LLMJobExtractor:
         
         logger.debug("LLM returned no jobs, will retry...")
         return {"jobs": [], "next_page_url": None}
-
-
-def find_job_section(soup: BeautifulSoup) -> Optional[str]:
-    """Find the HTML section containing job listings.
-    
-    Many pages have job widgets at the end of large HTML documents.
-    This function finds the relevant section to avoid truncation issues.
-    
-    Args:
-        soup: BeautifulSoup object of the page
-        
-    Returns:
-        HTML string of job section, or None if not found
-    """
-    # Check if this is an Odoo site first (most reliable detection)
-    from src.searchers.job_boards.odoo import OdooParser
-    
-    if OdooParser.is_odoo_site(soup):
-        logger.debug("Detected Odoo site, using Odoo-specific selectors")
-        odoo_html = OdooParser.find_job_section(soup)
-        if odoo_html:
-            return odoo_html
-    
-    # Try generic selectors for other platforms
-    candidates = []
-    
-    for selector in JOB_SECTION_SELECTORS:
-        try:
-            elements = soup.select(selector)
-            valid_elements = []
-            for el in elements:
-                el_text = el.get_text().lower()
-                # Check if element contains job-related content
-                if any(marker in el_text for marker in JOB_CONTENT_MARKERS):
-                    html = str(el)
-                    if MIN_JOB_SECTION_SIZE < len(html) < MAX_JOB_SECTION_SIZE:
-                        valid_elements.append(html)
-            
-            if valid_elements:
-                combined_html = "\n<hr>\n".join(valid_elements)
-                if len(combined_html) > 1000:
-                    candidates.append((len(combined_html), combined_html))
-        except Exception:
-            continue
-            
-    # Sort candidates by size (descending) to prefer larger collections
-    if candidates:
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        return candidates[0][1]
-        
-    return None
 
 
 def validate_jobs(jobs: list) -> list[JobDict]:

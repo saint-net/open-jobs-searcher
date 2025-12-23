@@ -130,9 +130,15 @@ job_history (id, job_id, event, changed_at, details)
 Извлечение вакансий через LLM:
 - `extract_jobs()` - гибридная экстракция (Schema.org + LLM)
 - `extract_jobs_with_pagination()` - с поддержкой next_page_url
-- `find_job_section()` - поиск секции с вакансиями в HTML
 - `validate_jobs()` - валидация и фильтрация не-вакансий
 - Retry логика при пустых результатах (MAX_LLM_RETRIES)
+
+#### HTML утилиты (`html_utils.py`)
+Подготовка HTML для LLM:
+- `clean_html()` - очистка от скриптов, стилей, лишних атрибутов
+- `html_to_markdown()` - конвертация в Markdown (3-5x экономия токенов)
+- `find_job_section()` - поиск секции с вакансиями в HTML
+- `extract_json()` - извлечение JSON из LLM-ответа
 
 #### LLMUrlDiscovery (`url_discovery.py`)
 Поиск URL через LLM:
