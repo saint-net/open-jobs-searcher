@@ -29,7 +29,7 @@ ruff check .
 
 ### Запуск тестов
 ```bash
-# Все тесты (~363 штуки, ~2.5 мин)
+# Все тесты (~402 штуки, ~2.5 мин)
 python -m pytest tests/ -v
 
 # Быстрая проверка
@@ -40,6 +40,9 @@ python -m pytest tests/test_job_board_parsers.py -v
 
 # После изменений в LLM кэше
 python -m pytest tests/test_llm_cache.py -v
+
+# После изменений в rate limiter
+python -m pytest tests/test_rate_limiter.py -v
 ```
 
 ## Добавление нового функционала
@@ -189,6 +192,11 @@ OPENROUTER_PROVIDER=azure                    # Конкретный провай
 OPENROUTER_PROVIDER_ORDER=azure,openai       # Порядок приоритета
 OPENROUTER_REQUIRE_PARAMETERS=json_schema    # Требовать structured output
 OPENROUTER_ALLOW_FALLBACKS=true              # Fallback при ошибках
+
+# Rate limiting (защита от банов)
+RATE_LIMIT_ENABLED=true                      # Включить rate limiting
+RATE_LIMIT_DELAY=0.5                         # Задержка между запросами (секунды)
+RATE_LIMIT_MAX_CONCURRENT=2                  # Макс. параллельных запросов к домену
 ```
 
 Популярные провайдеры: `azure`, `openai`, `google`, `anthropic`, `deepinfra`, `together`
@@ -218,16 +226,18 @@ OPENROUTER_ALLOW_FALLBACKS=true              # Fallback при ошибках
 ```
 tests/
 ├── conftest.py                    # Общие фикстуры
-├── fixtures/                      # Тестовые HTML файлы (21 файл)
+├── fixtures/                      # Тестовые HTML файлы (23 файла)
 │   │
 │   │  # Job Board платформы
 │   ├── greenhouse_style.html      # Greenhouse job board
 │   ├── hibob_jobs.html            # HiBob job board
 │   ├── hrworks_jobs.html          # HRworks job board
+│   ├── join_jobs.html             # Join.com widget
 │   ├── lever_jobs.html            # Lever job board
 │   ├── odoo_jobs.html             # Odoo CMS
 │   ├── personio_jobs.html         # Personio job board
 │   ├── recruitee_jobs.html        # Recruitee (embedded JSON)
+│   ├── softgarden_jobs.html       # Softgarden ATS
 │   ├── talention_jobs.html        # Talention job board
 │   ├── workable_jobs.html         # Workable (JSON-LD)
 │   │
@@ -254,7 +264,8 @@ tests/
 ├── test_cache_manager.py          # CacheManager тесты
 ├── test_llm_cache.py              # LLM response cache тесты
 ├── test_translation.py            # Перевод названий
-└── test_lazy_loading.py           # Lazy loading тесты
+├── test_lazy_loading.py           # Lazy loading тесты
+└── test_rate_limiter.py           # Rate limiting тесты
 ```
 
 ### Когда запускать тесты
@@ -267,6 +278,7 @@ tests/
 | `src/browser/loader.py` | `pytest tests/test_smoke_browser.py tests/test_lazy_loading.py -v` |
 | `src/extraction/*.py` | `pytest tests/test_smoke_extraction.py tests/test_integration_parsing.py -v` |
 | `src/searchers/job_boards/*.py` | `pytest tests/test_job_board_parsers.py -v` |
+| `src/searchers/rate_limiter.py`, `http_client.py` | `pytest tests/test_rate_limiter.py -v` |
 | `src/searchers/website.py`, `page_fetcher.py`, `job_converter.py`, `company_info.py` | `pytest tests/ -v` |
 | `src/searchers/job_extraction.py`, `job_filters.py` | `pytest tests/test_website_filters.py -v` |
 | `src/searchers/cache_manager.py` | `pytest tests/test_cache_manager.py -v` |

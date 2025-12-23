@@ -8,7 +8,8 @@
 - 🇩🇪 Поиск вакансий на StepStone.de - Германия
 - 🇦🇹 Поиск вакансий на Karriere.at - Австрия
 - 🤖 Поиск вакансий на любом сайте компании с помощью LLM
-- 🎯 Автоматическое определение популярных job board платформ (Personio, Greenhouse, Lever, Workable, Recruitee, HiBob, Deloitte, SmartRecruiters, Ashby, Breezy и др.)
+- 🎯 Автоматическое определение популярных job board платформ (Personio, Greenhouse, Lever, Workable, Recruitee, HiBob, Softgarden, Join.com, Deloitte, SmartRecruiters и др.)
+- 🛡️ Rate limiting для защиты от банов при массовом сканировании
 - 📊 Гибридная экстракция вакансий (Schema.org + LLM)
 - 📑 Автоматическая пагинация (до 3 страниц)
 - 💾 Кэширование вакансий в SQLite с отслеживанием изменений
@@ -289,7 +290,8 @@ open-jobs-searcher/
 │       ├── cache_manager.py  # CacheManager (кэширование)
 │       ├── job_extraction.py # JobExtractor (пагинация)
 │       ├── job_filters.py    # Фильтры и нормализация
-│       ├── http_client.py    # HTTP клиент с retry
+│       ├── http_client.py    # HTTP клиент с retry и rate limiting
+│       ├── rate_limiter.py   # Rate limiting (защита от банов)
 │       ├── url_discovery.py  # Поиск careers страниц
 │       └── job_boards/       # Парсеры job-платформ
 │           ├── base.py       # Базовый класс парсера
@@ -303,7 +305,9 @@ open-jobs-searcher/
 │           ├── hrworks.py    # HRworks
 │           ├── hibob.py      # HiBob
 │           ├── odoo.py       # Odoo CMS
-│           └── deloitte.py   # Deloitte
+│           ├── deloitte.py   # Deloitte
+│           ├── softgarden.py # Softgarden
+│           └── join.py       # Join.com
 └── README.md
 ```
 
@@ -321,6 +325,8 @@ open-jobs-searcher/
 - **HRworks** - HR и ATS платформа
 - **Odoo** - CMS с модулем вакансий
 - **Deloitte** - корпоративный job board
+- **Softgarden** - популярная ATS в Германии
+- **Join.com** - виджет вакансий для сайтов
 - **SmartRecruiters** - HR платформа
 - **Ashby** - современная ATS
 - **Breezy HR** - платформа для найма
@@ -355,6 +361,11 @@ OPENROUTER_PROVIDER=azure                    # Конкретный провай
 OPENROUTER_PROVIDER_ORDER=azure,openai       # Порядок приоритета
 OPENROUTER_REQUIRE_PARAMETERS=json_schema    # Требовать structured output
 OPENROUTER_ALLOW_FALLBACKS=true              # Разрешить fallback
+
+# Rate limiting (защита от банов)
+RATE_LIMIT_ENABLED=true                      # Включить rate limiting
+RATE_LIMIT_DELAY=0.5                         # Задержка между запросами (секунды)
+RATE_LIMIT_MAX_CONCURRENT=2                  # Макс. параллельных запросов к домену
 ```
 
 Популярные провайдеры: `azure`, `openai`, `google`, `anthropic`, `deepinfra`, `together`

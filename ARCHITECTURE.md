@@ -54,6 +54,8 @@ Open Jobs Searcher - это инструмент для поиска вакан�
 - Recruitee - API-based парсинг
 - SmartRecruiters, Ashby, Breezy HR - HTML парсинг
 - BambooHR, Factorial - HTML парсинг
+- Softgarden - популярная ATS в Германии
+- Join.com - виджет вакансий (встраивается на сайты)
 
 ### 4. База данных (`src/database/`)
 
@@ -190,10 +192,25 @@ job_history (id, job_id, event, changed_at, details)
 
 Асинхронный HTTP клиент с:
 - Автоматическими retry
-- Обработкой rate limits
+- Интеграцией с RateLimiter
 - Таймаутами
 - User-Agent ротацией
 - Domain availability check
+
+### 8.1 Rate Limiter (`src/searchers/rate_limiter.py`)
+
+Защита от банов при массовом сканировании:
+- **Fixed delay** - минимальная задержка между запросами к одному домену
+- **Domain semaphore** - ограничение параллельных запросов к домену
+- **Adaptive backoff** - увеличение задержки при 429/503 ответах
+- **Retry-After header** - соблюдение задержки, указанной сервером
+
+Настраивается через `.env`:
+```bash
+RATE_LIMIT_ENABLED=true      # Включить/выключить
+RATE_LIMIT_DELAY=0.5         # Базовая задержка (секунды)
+RATE_LIMIT_MAX_CONCURRENT=2  # Макс. параллельных запросов к домену
+```
 
 ### 9. URL Discovery (`src/searchers/url_discovery.py`)
 
@@ -214,6 +231,10 @@ Pydantic Settings для управления настройками:
   - `openrouter_provider_order` - список через запятую (например: `azure,openai`)
   - `openrouter_require_parameters` - требуемые параметры (например: `json_schema`)
   - `openrouter_allow_fallbacks` - разрешать fallback при ошибках
+- Rate limiting настройки:
+  - `rate_limit_enabled` - включить/выключить rate limiting
+  - `rate_limit_delay` - базовая задержка между запросами (секунды)
+  - `rate_limit_max_concurrent` - макс. параллельных запросов к домену
 
 ### 11. Константы (`src/constants.py`)
 
@@ -382,7 +403,8 @@ CLI (history) → JobRepository → job_history table → Output
 |-----|-------|----------|
 | Smoke | `test_smoke_*.py` | Быстрые проверки отдельных функций |
 | Integration | `test_integration_*.py` | Парсинг с сохранённым HTML |
-| Job Boards | `test_job_board_parsers.py` | Парсеры платформ |
+| Job Boards | `test_job_board_parsers.py` | Парсеры платформ (Lever, Personio, Recruitee, Workable, Greenhouse, Odoo, HRworks, HiBob, Softgarden, Join.com) |
+| Rate Limiter | `test_rate_limiter.py` | Rate limiting, backoff, Retry-After |
 | Filters | `test_website_filters.py` | Фильтрация вакансий |
 | Cache | `test_cache_manager.py`, `test_llm_cache.py` | CacheManager, LLM cache |
 | Translation | `test_translation.py` | Перевод названий |
@@ -392,10 +414,11 @@ CLI (history) → JobRepository → job_history table → Output
 
 ```
 tests/
-├── fixtures/                      # Тестовые HTML (21 файл)
+├── fixtures/                      # Тестовые HTML (23 файла)
 ├── test_smoke_*.py                # Smoke тесты модулей
 ├── test_integration_parsing.py    # E2E парсинг
-├── test_job_board_parsers.py      # Lever, Personio, Recruitee, Workable, Greenhouse, Odoo, HRworks, HiBob
+├── test_job_board_parsers.py      # Парсеры платформ (+ Softgarden, Join.com)
+├── test_rate_limiter.py           # Rate limiting тесты
 ├── test_website_filters.py        # Фильтрация и нормализация
 ├── test_cache_manager.py          # CacheManager тесты
 ├── test_llm_cache.py              # LLM cache тесты
@@ -406,8 +429,9 @@ tests/
 ### Запуск
 
 ```bash
-python -m pytest tests/ -q                        # Все тесты (~363 штуки, ~2.5 мин)
+python -m pytest tests/ -q                        # Все тесты (~402 штуки, ~2.5 мин)
 python -m pytest tests/test_job_board_parsers.py  # После изменений в job_boards/
+python -m pytest tests/test_rate_limiter.py       # После изменений в rate_limiter.py
 python -m pytest tests/test_cache_manager.py      # После изменений в cache_manager
 python -m pytest tests/test_llm_cache.py          # После изменений в llm/cache.py
 ```
