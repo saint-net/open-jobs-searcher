@@ -406,7 +406,7 @@ tests/
 ### Запуск
 
 ```bash
-python -m pytest tests/ -q                        # Все тесты (~310 штук, ~1 сек)
+python -m pytest tests/ -q                        # Все тесты (~363 штуки, ~2.5 мин)
 python -m pytest tests/test_job_board_parsers.py  # После изменений в job_boards/
 python -m pytest tests/test_cache_manager.py      # После изменений в cache_manager
 python -m pytest tests/test_llm_cache.py          # После изменений в llm/cache.py

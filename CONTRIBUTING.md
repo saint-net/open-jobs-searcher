@@ -29,7 +29,7 @@ ruff check .
 
 ### Запуск тестов
 ```bash
-# Все тесты (~310 штук, ~1 сек)
+# Все тесты (~363 штуки, ~2.5 мин)
 python -m pytest tests/ -v
 
 # Быстрая проверка
@@ -83,9 +83,24 @@ BaseLLMProvider (base.py)
 2. Реализуйте метод `extract(html: str, url: str) -> list[JobCandidate]`
 3. При необходимости интегрируйте в `HybridJobExtractor`
 
-**Важно:** Избегайте эвристических стратегий, которые могут давать ложные срабатывания. Текущая архитектура использует только:
+**Важно:** Избегайте эвристических стратегий с ложными срабатываниями. Текущая архитектура:
 - Schema.org (100% точность)
+- PDF ссылки (для вакансий в PDF)
 - LLM (основной метод)
+
+### Архитектура WebsiteSearcher
+
+WebsiteSearcher разбит на модули с чёткими ответственностями:
+
+```
+WebsiteSearcher (website.py) — оркестратор
+├── PageFetcher (page_fetcher.py) — загрузка страниц (HTTP + Browser)
+├── JobConverter (job_converter.py) — конвертация в Job + перевод
+├── CompanyInfoExtractor (company_info.py) — извлечение info компании
+├── CacheManager (cache_manager.py) — кэширование URL и вакансий
+├── JobExtractor (job_extraction.py) — пагинация
+└── CareerUrlDiscovery (url_discovery.py) — поиск careers URL
+```
 
 ### Работа с базой данных
 
@@ -151,23 +166,34 @@ jobs = await llm.extract_jobs(html, url)
 
 ### OpenRouter Provider Routing
 
-Для повышения стабильности можно указать конкретный бэкенд-провайдер:
+[Provider Routing](https://openrouter.ai/docs/features/provider-routing) для повышения стабильности:
 
 ```python
 from src.llm import get_llm_provider
 
 # С явным указанием провайдера
-llm = get_llm_provider("openrouter", model="openai/gpt-oss-120b", provider="chutes")
+llm = get_llm_provider("openrouter", model="openai/gpt-4o-mini", provider="azure")
 
-# Через настройки (src/config.py)
-# OPENROUTER_PROVIDER=chutes
-# OPENROUTER_ALLOW_FALLBACKS=true
+# С приоритетом провайдеров
+llm = get_llm_provider(
+    "openrouter", 
+    model="openai/gpt-4o-mini",
+    provider_order=["azure", "openai"],
+    require_parameters=["json_schema"],
+)
 ```
 
-Доступные провайдеры для `openai/gpt-oss-120b`:
-- `chutes` - ~97.6% uptime (рекомендуется)
-- `siliconflow` - ~97.7% uptime
-- `novitaai`, `gmicloud`, `deepinfra`, `ncompass`
+Настройки через `.env`:
+```bash
+OPENROUTER_PROVIDER=azure                    # Конкретный провайдер
+OPENROUTER_PROVIDER_ORDER=azure,openai       # Порядок приоритета
+OPENROUTER_REQUIRE_PARAMETERS=json_schema    # Требовать structured output
+OPENROUTER_ALLOW_FALLBACKS=true              # Fallback при ошибках
+```
+
+Популярные провайдеры: `azure`, `openai`, `google`, `anthropic`, `deepinfra`, `together`
+
+Система логирует фактический провайдер для каждого LLM вызова.
 
 ## Коммиты
 
@@ -241,8 +267,10 @@ tests/
 | `src/browser/loader.py` | `pytest tests/test_smoke_browser.py tests/test_lazy_loading.py -v` |
 | `src/extraction/*.py` | `pytest tests/test_smoke_extraction.py tests/test_integration_parsing.py -v` |
 | `src/searchers/job_boards/*.py` | `pytest tests/test_job_board_parsers.py -v` |
-| `src/searchers/website.py`, `job_extraction.py`, `job_filters.py` | `pytest tests/test_website_filters.py -v` |
+| `src/searchers/website.py`, `page_fetcher.py`, `job_converter.py`, `company_info.py` | `pytest tests/ -v` |
+| `src/searchers/job_extraction.py`, `job_filters.py` | `pytest tests/test_website_filters.py -v` |
 | `src/searchers/cache_manager.py` | `pytest tests/test_cache_manager.py -v` |
+| `src/searchers/url_discovery.py` | `pytest tests/test_integration_parsing.py -v` |
 
 ### Добавление тестового сайта
 

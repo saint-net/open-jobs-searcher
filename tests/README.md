@@ -18,7 +18,7 @@
 ## Запуск тестов
 
 ```bash
-# ВСЕ тесты (~310 штук, ~1 сек)
+# ВСЕ тесты (~363 штуки, ~2.5 мин)
 python -m pytest tests/ -v
 
 # Только smoke тесты (быстро)
@@ -50,8 +50,10 @@ python -m pytest tests/ -q
 | `src/browser/loader.py` | `test_smoke_browser.py`, `test_lazy_loading.py` |
 | `src/extraction/*.py` | `test_smoke_extraction.py`, `test_integration_parsing.py` |
 | `src/searchers/job_boards/*.py` | `test_job_board_parsers.py` |
-| `src/searchers/website.py`, `job_extraction.py`, `job_filters.py` | `test_website_filters.py` |
+| `src/searchers/website.py`, `page_fetcher.py`, `job_converter.py`, `company_info.py` | все тесты |
+| `src/searchers/job_extraction.py`, `job_filters.py` | `test_website_filters.py` |
 | `src/searchers/cache_manager.py` | `test_cache_manager.py` |
+| `src/searchers/url_discovery.py` | `test_integration_parsing.py` |
 
 ### Рекомендуется перед коммитом
 

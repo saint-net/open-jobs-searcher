@@ -261,7 +261,7 @@ open-jobs-searcher/
 │   ├── extraction/      # 🔍 Гибридная экстракция
 │   │   ├── extractor.py     # HybridJobExtractor
 │   │   ├── candidate.py     # JobCandidate с scoring
-│   │   └── strategies.py    # Стратегии (Schema.org, PDF)
+│   │   └── strategies.py    # Schema.org + PDF стратегии
 │   ├── browser/         # Playwright загрузчик (SPA)
 │   │   ├── loader.py        # Загрузчик страниц (lazy loading, scrolling)
 │   │   ├── navigation.py    # Навигация по сайту
@@ -282,7 +282,10 @@ open-jobs-searcher/
 │       ├── hh.py             # HeadHunter API
 │       ├── stepstone.py      # StepStone.de
 │       ├── karriere.py       # Karriere.at
-│       ├── website.py        # Универсальный парсер сайтов
+│       ├── website.py        # Универсальный парсер (оркестратор)
+│       ├── page_fetcher.py   # HTTP/Browser загрузка страниц
+│       ├── job_converter.py  # Конвертация в Job модели
+│       ├── company_info.py   # Извлечение info о компании
 │       ├── cache_manager.py  # CacheManager (кэширование)
 │       ├── job_extraction.py # JobExtractor (пагинация)
 │       ├── job_filters.py    # Фильтры и нормализация
@@ -341,16 +344,20 @@ open-jobs-searcher/
 
 ### OpenRouter Provider Routing
 
-OpenRouter поддерживает выбор конкретного бэкенд-провайдера для повышения стабильности:
+OpenRouter поддерживает [Provider Routing](https://openrouter.ai/docs/features/provider-routing) для повышения стабильности:
 
 ```bash
 # Через CLI
-python main.py website https://example.com --openrouter-provider chutes
+python main.py website https://example.com --openrouter-provider azure
 
 # Через .env файл
-OPENROUTER_PROVIDER=chutes
-OPENROUTER_ALLOW_FALLBACKS=true
+OPENROUTER_PROVIDER=azure                    # Конкретный провайдер
+OPENROUTER_PROVIDER_ORDER=azure,openai       # Порядок приоритета
+OPENROUTER_REQUIRE_PARAMETERS=json_schema    # Требовать structured output
+OPENROUTER_ALLOW_FALLBACKS=true              # Разрешить fallback
 ```
+
+Популярные провайдеры: `azure`, `openai`, `google`, `anthropic`, `deepinfra`, `together`
 
 ## Кэширование и история
 
