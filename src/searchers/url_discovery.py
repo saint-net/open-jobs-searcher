@@ -454,6 +454,72 @@ class CareerUrlDiscovery:
         
         return all_urls[:max_urls]
 
+    def choose_best_careers_url(
+        self, sitemap_url: Optional[str], nav_url: Optional[str]
+    ) -> Optional[str]:
+        """Choose the best careers URL between sitemap and navigation link.
+        
+        Navigation links from main page are often better because:
+        - Sitemap might return specific job page instead of listing
+        - Navigation links point to actual job listing pages
+        
+        Args:
+            sitemap_url: URL found from sitemap.xml
+            nav_url: URL found from main page navigation
+            
+        Returns:
+            Best URL to use, or None if both are invalid
+        """
+        # If only one exists, use it
+        if not sitemap_url or sitemap_url == "NOT_FOUND":
+            return nav_url
+        if not nav_url:
+            return sitemap_url
+        
+        # Both exist - compare them
+        sitemap_path = urlparse(sitemap_url).path.rstrip('/')
+        nav_path = urlparse(nav_url).path.rstrip('/')
+        
+        sitemap_segments = [s for s in sitemap_path.split('/') if s]
+        nav_segments = [s for s in nav_path.split('/') if s]
+        
+        # Check if sitemap URL looks like a specific job page (has slug after /career/)
+        # e.g., /en/career/devops-engineer vs /en/career or /en/ui
+        sitemap_last = sitemap_segments[-1] if sitemap_segments else ''
+        nav_last = nav_segments[-1] if nav_segments else ''
+        
+        # Job listing keywords that indicate a listing page (not specific job)
+        listing_keywords = {
+            'jobs', 'careers', 'career', 'vacancies', 'openings', 
+            'stellen', 'karriere', 'stellenangebote', 'offene-stellen',
+            'вакансии', 'карьера'
+        }
+        
+        sitemap_is_listing = sitemap_last.lower() in listing_keywords
+        nav_is_listing = nav_last.lower() in listing_keywords
+        
+        # Prefer listing pages over specific job pages
+        if nav_is_listing and not sitemap_is_listing:
+            logger.debug(f"Preferring nav URL (listing page): {nav_url} over sitemap: {sitemap_url}")
+            return nav_url
+        if sitemap_is_listing and not nav_is_listing:
+            logger.debug(f"Preferring sitemap URL (listing page): {sitemap_url} over nav: {nav_url}")
+            return sitemap_url
+        
+        # Both are similar type - prefer shorter path (likely parent/listing page)
+        if len(nav_segments) < len(sitemap_segments):
+            logger.debug(f"Preferring nav URL (shorter path): {nav_url} over sitemap: {sitemap_url}")
+            return nav_url
+        
+        # If sitemap URL has a long slug (likely specific job), prefer nav
+        if len(sitemap_last) > 20 and len(nav_last) <= 20:
+            logger.debug(f"Preferring nav URL (sitemap has long slug): {nav_url} over sitemap: {sitemap_url}")
+            return nav_url
+        
+        # Default: prefer sitemap (usually more reliable)
+        logger.debug(f"Using sitemap URL: {sitemap_url} (nav was: {nav_url})")
+        return sitemap_url
+
     def generate_url_variants(self, url: str) -> list[str]:
         """Generate plural/singular variants of a careers URL.
         

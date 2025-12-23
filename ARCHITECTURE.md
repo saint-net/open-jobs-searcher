@@ -30,7 +30,12 @@ Open Jobs Searcher - это инструмент для поиска вакан�
 - **HeadHunterSearcher** (`hh.py`) - использует официальный API HeadHunter
 - **StepStoneSearcher** (`stepstone.py`) - парсинг HTML StepStone.de
 - **KarriereATSearcher** (`karriere.py`) - парсинг HTML Karriere.at
-- **WebsiteSearcher** (`website.py`) - универсальный парсер с LLM, пагинацией и кэшированием
+- **WebsiteSearcher** (`website.py`) - оркестратор для универсального парсинга
+
+#### Вспомогательные модули
+- **PageFetcher** (`page_fetcher.py`) - унифицированная загрузка страниц (HTTP + Browser)
+- **JobConverter** (`job_converter.py`) - конвертация raw job data → Job модели + перевод
+- **CompanyInfoExtractor** (`company_info.py`) - извлечение и сохранение информации о компании
 
 ### 3. Job Board парсеры (`src/searchers/job_boards/`)
 
