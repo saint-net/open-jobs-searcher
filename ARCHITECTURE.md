@@ -152,9 +152,13 @@ job_history (id, job_id, event, changed_at, details)
 - **OpenRouterProvider** (`openrouter.py`) - OpenRouter API с Provider Routing:
   - Поддержка 300+ моделей
   - Дефолтная модель: `openai/gpt-4o-mini`
-  - Provider routing: выбор конкретного бэкенда (chutes, siliconflow, etc.)
-  - Retry logic для transient errors
-  - Configurable fallbacks
+  - **Provider Routing** ([docs](https://openrouter.ai/docs/features/provider-routing)):
+    - `provider` - конкретный бэкенд (azure, openai, deepinfra, etc.)
+    - `provider_order` - список провайдеров в порядке приоритета
+    - `require_parameters` - требуемые параметры (json_schema, tools, etc.)
+    - `allow_fallbacks` - разрешать fallback при ошибках
+  - Логирование фактического провайдера из ответа
+  - Retry logic для transient errors (502, 503, rate limit)
   - Structured Output: `response_format={"type": "json_schema"}` для строгой типизации
 
 #### Промпты (`prompts.py`)
@@ -201,8 +205,10 @@ Pydantic Settings для управления настройками:
 - Значения по умолчанию
 - Валидация типов
 - OpenRouter provider routing настройки:
-  - `openrouter_provider` - конкретный бэкенд
-  - `openrouter_allow_fallbacks` - разрешать fallback
+  - `openrouter_provider` - конкретный бэкенд (например: `azure`)
+  - `openrouter_provider_order` - список через запятую (например: `azure,openai`)
+  - `openrouter_require_parameters` - требуемые параметры (например: `json_schema`)
+  - `openrouter_allow_fallbacks` - разрешать fallback при ошибках
 
 ### 11. Константы (`src/constants.py`)
 

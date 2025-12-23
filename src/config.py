@@ -27,13 +27,22 @@ class Settings(BaseSettings):
     )
 
     # OpenRouter provider routing
+    # https://openrouter.ai/docs/features/provider-routing
     # Для gpt-4o-mini OpenRouter автоматически выбирает лучших провайдеров
-    # Для других моделей можно указать конкретный провайдер
+    # Для других моделей можно указать провайдеров вручную
     openrouter_provider: str = Field(
-        default="", description="Конкретный провайдер OpenRouter (опционально)"
+        default="", description="Конкретный провайдер OpenRouter (например: 'azure')"
+    )
+    openrouter_provider_order: str = Field(
+        default="",
+        description="Список провайдеров через запятую в порядке приоритета (например: 'azure,openai')"
     )
     openrouter_allow_fallbacks: bool = Field(
-        default=True, description="Разрешать fallback на другие провайдеры"
+        default=True, description="Разрешать fallback на другие провайдеры при ошибках"
+    )
+    openrouter_require_parameters: str = Field(
+        default="",
+        description="Требуемые параметры через запятую (например: 'json_schema,tools')"
     )
 
     # OpenAI (для будущего использования)

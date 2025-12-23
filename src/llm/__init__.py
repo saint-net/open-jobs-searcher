@@ -26,11 +26,21 @@ def get_llm_provider(provider: str = "ollama", **kwargs) -> BaseLLMProvider:
             # Используем API ключ из настроек, если не передан явно
             if "api_key" not in kwargs:
                 kwargs["api_key"] = settings.openrouter_api_key
-            # Используем настройки provider routing из конфига
+            # Provider routing настройки из конфига
             if "provider" not in kwargs and settings.openrouter_provider:
                 kwargs["provider"] = settings.openrouter_provider
+            if "provider_order" not in kwargs and settings.openrouter_provider_order:
+                # Парсим список провайдеров из строки "azure,openai" -> ["azure", "openai"]
+                kwargs["provider_order"] = [
+                    p.strip() for p in settings.openrouter_provider_order.split(",") if p.strip()
+                ]
             if "allow_fallbacks" not in kwargs:
                 kwargs["allow_fallbacks"] = settings.openrouter_allow_fallbacks
+            if "require_parameters" not in kwargs and settings.openrouter_require_parameters:
+                # Парсим список параметров из строки "json_schema,tools" -> ["json_schema", "tools"]
+                kwargs["require_parameters"] = [
+                    p.strip() for p in settings.openrouter_require_parameters.split(",") if p.strip()
+                ]
             return OpenRouterProvider(**kwargs)
         case "openai":
             raise NotImplementedError("OpenAI provider coming soon")

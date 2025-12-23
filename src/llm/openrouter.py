@@ -103,16 +103,39 @@ class OpenRouterProvider(BaseLLMProvider):
         "502", "503", "504",  # Gateway errors
     ]
     
-    # Доступные провайдеры OpenRouter для gpt-oss-120b
-    # Список slug-ов провайдеров: https://openrouter.ai/openai/gpt-oss-120b/providers
-    AVAILABLE_PROVIDERS = [
-        "mara",         # High throughput
-        "chutes",
-        "siliconflow",
-        "novitaai",
-        "gmicloud",
-        "deepinfra",
-        "ncompass",
+    # Популярные провайдеры OpenRouter (актуально на Dec 2024)
+    # Полный список: https://openrouter.ai/docs/features/provider-routing#provider-list
+    # Конкретные провайдеры для модели: https://openrouter.ai/{model}/providers
+    POPULAR_PROVIDERS = {
+        # Официальные API провайдеры
+        "openai": "OpenAI direct API",
+        "anthropic": "Anthropic direct API", 
+        "google": "Google AI direct API",
+        "azure": "Microsoft Azure OpenAI",
+        # Инференс-платформы
+        "deepinfra": "DeepInfra (fast, cheap)",
+        "together": "Together AI",
+        "fireworks": "Fireworks AI",
+        "lepton": "Lepton AI",
+        "mancer": "Mancer (uncensored)",
+        # Для OpenAI-совместимых моделей
+        "chutes": "Chutes (gpt-oss models)",
+        "novita": "Novita AI",
+    }
+    
+    # Параметры которые можно требовать от провайдеров
+    # https://openrouter.ai/docs/features/provider-routing#require-parameters
+    VALID_REQUIRE_PARAMETERS = [
+        "json_schema",      # Structured output support
+        "tools",            # Function calling support
+        "temperature",      # Temperature control
+        "top_p",            # Top-p sampling
+        "top_k",            # Top-k sampling
+        "frequency_penalty",
+        "presence_penalty",
+        "repetition_penalty",
+        "min_p",
+        "top_a",
     ]
 
     def __init__(
@@ -123,17 +146,19 @@ class OpenRouterProvider(BaseLLMProvider):
         provider: Optional[str] = None,
         provider_order: Optional[list[str]] = None,
         allow_fallbacks: bool = True,
+        require_parameters: Optional[list[str]] = None,
     ):
         """
         Инициализация OpenRouter провайдера.
 
         Args:
             api_key: API ключ OpenRouter
-            model: Название модели (например, openai/gpt-oss-120b)
+            model: Название модели (например, openai/gpt-4o-mini)
             timeout: Таймаут запросов в секундах
-            provider: Конкретный провайдер для использования (например, "chutes")
-            provider_order: Список провайдеров в порядке приоритета
-            allow_fallbacks: Разрешать ли fallback на другие провайдеры
+            provider: Конкретный провайдер для использования (например, "azure")
+            provider_order: Список провайдеров в порядке приоритета (например, ["azure", "openai"])
+            allow_fallbacks: Разрешать ли fallback на другие провайдеры при ошибках
+            require_parameters: Параметры которые должен поддерживать провайдер (например, ["json_schema"])
         """
         if not api_key:
             raise ValueError("OpenRouter API key is required")
@@ -147,34 +172,61 @@ class OpenRouterProvider(BaseLLMProvider):
         self.provider = provider
         self.provider_order = provider_order
         self.allow_fallbacks = allow_fallbacks
+        self.require_parameters = require_parameters
         
         # Usage tracking
         self.usage_stats = LLMUsageStats()
+        
+        # Log provider config if set
+        if provider or provider_order or require_parameters:
+            routing_info = []
+            if provider:
+                routing_info.append(f"provider={provider}")
+            if provider_order:
+                routing_info.append(f"order={provider_order}")
+            if require_parameters:
+                routing_info.append(f"require={require_parameters}")
+            logger.info(f"OpenRouter routing: {', '.join(routing_info)}")
 
     def _is_transient_error(self, error_msg: str) -> bool:
         """Check if error is transient and should be retried."""
         error_lower = error_msg.lower()
         return any(pattern in error_lower for pattern in self.TRANSIENT_ERROR_PATTERNS)
     
-    def _build_provider_config(self) -> Optional[dict]:
+    def _build_provider_config(self, require_structured: bool = False) -> Optional[dict]:
         """
         Построить конфигурацию provider routing для запроса.
+        
+        Args:
+            require_structured: Требовать поддержку json_schema от провайдера
         
         Returns:
             dict с настройками провайдера или None если не указаны
         """
-        if not self.provider and not self.provider_order:
+        has_routing = self.provider or self.provider_order
+        has_require = self.require_parameters or require_structured
+        
+        if not has_routing and not has_require:
             return None
         
         config = {}
         
-        # Если указан конкретный провайдер, используем его как единственный в order
+        # Порядок провайдеров
         if self.provider:
             config["order"] = [self.provider]
         elif self.provider_order:
             config["order"] = self.provider_order
         
-        config["allow_fallbacks"] = self.allow_fallbacks
+        # Fallback настройка
+        if has_routing:
+            config["allow_fallbacks"] = self.allow_fallbacks
+        
+        # Требуемые параметры от провайдера
+        required = list(self.require_parameters) if self.require_parameters else []
+        if require_structured and "json_schema" not in required:
+            required.append("json_schema")
+        if required:
+            config["require_parameters"] = required
         
         return config
 
@@ -318,6 +370,20 @@ class OpenRouterProvider(BaseLLMProvider):
             message = choices[0].get("message", {})
             return message.get("content", "")
         return ""
+    
+    def _log_provider_used(self, data: dict) -> None:
+        """Log which provider actually handled the request."""
+        # OpenRouter returns provider info in the response
+        # Either in 'model' field suffix or 'provider' field
+        model_used = data.get("model", "")
+        provider_name = data.get("provider", "")
+        
+        if provider_name:
+            logger.debug(f"Request handled by provider: {provider_name}")
+        elif "/" in model_used and ":" in model_used:
+            # Format: "openai/gpt-4o-mini:provider-slug"
+            provider_slug = model_used.split(":")[-1]
+            logger.debug(f"Request handled by provider: {provider_slug}")
 
     @retry(
         stop=stop_after_attempt(3),  # MAX_RETRIES
@@ -348,6 +414,7 @@ class OpenRouterProvider(BaseLLMProvider):
             elapsed = time.perf_counter() - start_time
             
             self._track_usage(data, elapsed)
+            self._log_provider_used(data)
             return self._extract_content(data)
             
         except OpenRouterRetryableError:
@@ -395,6 +462,7 @@ class OpenRouterProvider(BaseLLMProvider):
             elapsed = time.perf_counter() - start_time
             
             self._track_usage(data, elapsed, json_mode=True)
+            self._log_provider_used(data)
             
             content = self._extract_content(data)
             if content:
@@ -476,7 +544,8 @@ class OpenRouterProvider(BaseLLMProvider):
             "response_format": response_format,
         }
         
-        provider_config = self._build_provider_config()
+        # Требуем json_schema от провайдера только если используем structured output
+        provider_config = self._build_provider_config(require_structured=use_json_schema)
         if provider_config:
             payload["provider"] = provider_config
 
@@ -487,6 +556,9 @@ class OpenRouterProvider(BaseLLMProvider):
             elapsed = time.perf_counter() - start_time
             
             self._track_usage(data, elapsed, json_mode=True)
+            
+            # Log actual provider used (OpenRouter returns it in response)
+            self._log_provider_used(data)
             
             content = self._extract_content(data)
             if content:
