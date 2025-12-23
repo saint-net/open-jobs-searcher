@@ -40,12 +40,14 @@ def mock_repository():
     repo.get_career_urls = AsyncMock(return_value=[])
     repo.mark_url_success = AsyncMock()
     repo.mark_url_failed = AsyncMock(return_value=False)
+    repo.mark_url_suspicious = AsyncMock(return_value=(1, False))
     repo.get_previous_job_count = AsyncMock(return_value=0)
+    repo.get_active_job_count = AsyncMock(return_value=0)
     repo.sync_jobs = AsyncMock(return_value=MockSyncResult([], [], []))
     repo.update_site_scanned = AsyncMock()
     repo.update_site_description = AsyncMock()
     repo.get_or_create_site = AsyncMock()
-    repo.add_career_url = AsyncMock()
+    repo.add_career_url = AsyncMock(return_value=MockCareerUrl(id=1, url="test", site_id=1))
     return repo
 
 

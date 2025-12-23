@@ -541,7 +541,10 @@ class TestProtocolBasedMocking:
         mock_repo.get_site_by_domain = AsyncMock(return_value=MockSite(1, "test.com"))
         mock_repo.get_career_urls = AsyncMock(return_value=[MockCareerUrl(1, "https://test.com/jobs", 1)])
         mock_repo.mark_url_success = AsyncMock()
+        mock_repo.mark_url_suspicious = AsyncMock(return_value=(1, False))
+        mock_repo.get_active_job_count = AsyncMock(return_value=0)
         mock_repo.sync_jobs = AsyncMock(return_value=MockSyncResult([], [], []))
+        mock_repo.update_site_scanned = AsyncMock()
         
         extract_jobs = AsyncMock(return_value=[{"title": "Dev", "location": "Berlin"}])
         convert_jobs = AsyncMock(return_value=[MagicMock()])

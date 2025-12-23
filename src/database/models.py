@@ -21,7 +21,7 @@ class ExtractionMethod(str, Enum):
 @dataclass
 class Site:
     """Company site record."""
-    
+
     id: int
     domain: str
     name: Optional[str] = None
@@ -33,22 +33,37 @@ class Site:
 @dataclass
 class CareerUrl:
     """Career page URL record."""
-    
+
     id: int
     site_id: int
     url: str
     platform: Optional[str] = None
     is_active: bool = True
     fail_count: int = 0
+    suspicious_count: int = 0  # Count of suspicious job drops (>50% decrease)
     last_success_at: Optional[datetime] = None
     last_fail_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
 
 @dataclass
+class FetchResult:
+    """Result of page fetch with success indicator.
+    
+    Used to distinguish between:
+    - success=True, jobs=[] → page loaded, no jobs found
+    - success=False, jobs=[] → page failed to load, don't sync
+    """
+
+    jobs: list = field(default_factory=list)
+    success: bool = True
+    error: Optional[str] = None  # Error message if success=False
+
+
+@dataclass
 class CachedJob:
     """Cached job record from database."""
-    
+
     id: int
     site_id: int
     title: str
@@ -74,7 +89,7 @@ class CachedJob:
 @dataclass
 class JobHistoryEvent:
     """Job history event record."""
-    
+
     id: int
     job_id: int
     event: str  # "added", "removed", "updated", "reactivated"
@@ -85,13 +100,13 @@ class JobHistoryEvent:
 @dataclass
 class SyncResult:
     """Result of job synchronization."""
-    
+
     total_jobs: int = 0
     new_jobs: list = field(default_factory=list)
     removed_jobs: list = field(default_factory=list)
     reactivated_jobs: list = field(default_factory=list)
     is_first_scan: bool = False  # True if this is the first scan for this site
-    
+
     @property
     def has_changes(self) -> bool:
         """Check if there are any changes."""
@@ -101,7 +116,7 @@ class SyncResult:
 @dataclass
 class LLMCacheEntry:
     """LLM response cache entry."""
-    
+
     key: str
     namespace: str
     value: str
@@ -110,7 +125,7 @@ class LLMCacheEntry:
     created_at: Optional[datetime] = None
     hit_count: int = 0
     tokens_saved: int = 0
-    
+
     def is_expired(self) -> bool:
         """Check if cache entry has expired."""
         if not self.created_at:
@@ -123,17 +138,17 @@ class LLMCacheEntry:
 @dataclass
 class LLMCacheStats:
     """Statistics for LLM cache usage."""
-    
+
     hits: int = 0
     misses: int = 0
     total_tokens_saved: int = 0
-    
+
     @property
     def hit_rate(self) -> float:
         """Calculate cache hit rate."""
         total = self.hits + self.misses
         return self.hits / total if total > 0 else 0.0
-    
+
     @property
     def estimated_cost_saved(self) -> float:
         """Estimate cost saved (rough approximation: $0.01 per 1K tokens)."""

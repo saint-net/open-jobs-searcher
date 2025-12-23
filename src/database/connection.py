@@ -33,19 +33,19 @@ async def init_database(db_path: Path | None = None) -> None:
     """
     if db_path is None:
         db_path = get_db_path()
-    
+
     # Ensure data directory exists
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     logger.debug(f"Initializing database at {db_path}")
-    
+
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(SCHEMA)
         await db.commit()
-        
+
         # Run migrations for existing databases
         await _run_migrations(db)
-    
+
     logger.debug("Database initialized successfully")
 
 
@@ -55,12 +55,12 @@ async def _run_migrations(db) -> None:
     cursor = await db.execute("PRAGMA table_info(sites)")
     columns = await cursor.fetchall()
     column_names = [col[1] for col in columns]
-    
+
     if "description" not in column_names:
         logger.debug("Adding 'description' column to sites table")
         await db.execute("ALTER TABLE sites ADD COLUMN description TEXT")
         await db.commit()
-    
+
     # Migration: Create llm_cache table if it doesn't exist
     cursor = await db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='llm_cache'"
@@ -82,20 +82,30 @@ async def _run_migrations(db) -> None:
         await db.execute("CREATE INDEX idx_llm_cache_namespace ON llm_cache(namespace)")
         await db.execute("CREATE INDEX idx_llm_cache_expiry ON llm_cache(created_at, ttl_seconds)")
         await db.commit()
-    
+
     # Migration: Add extraction_method column to jobs table if it doesn't exist
     cursor = await db.execute("PRAGMA table_info(jobs)")
     columns = await cursor.fetchall()
     job_column_names = [col[1] for col in columns]
-    
+
     if "extraction_method" not in job_column_names:
         logger.debug("Adding 'extraction_method' column to jobs table")
         await db.execute("ALTER TABLE jobs ADD COLUMN extraction_method TEXT")
         await db.commit()
-    
+
     if "extraction_details" not in job_column_names:
         logger.debug("Adding 'extraction_details' column to jobs table")
         await db.execute("ALTER TABLE jobs ADD COLUMN extraction_details TEXT")
+        await db.commit()
+
+    # Migration: Add suspicious_count column to career_urls table
+    cursor = await db.execute("PRAGMA table_info(career_urls)")
+    columns = await cursor.fetchall()
+    career_url_columns = [col[1] for col in columns]
+
+    if "suspicious_count" not in career_url_columns:
+        logger.debug("Adding 'suspicious_count' column to career_urls table")
+        await db.execute("ALTER TABLE career_urls ADD COLUMN suspicious_count INTEGER DEFAULT 0")
         await db.commit()
 
 
@@ -118,6 +128,7 @@ CREATE TABLE IF NOT EXISTS career_urls (
     platform TEXT,
     is_active BOOLEAN DEFAULT TRUE,
     fail_count INTEGER DEFAULT 0,
+    suspicious_count INTEGER DEFAULT 0,
     last_success_at TIMESTAMP,
     last_fail_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -9,6 +9,8 @@ from src.database.models import (
     LLMCacheEntry,
     LLMCacheStats,
     ExtractionMethod,
+    FetchResult,
+    SyncResult,
 )
 from src.database.repository import JobRepository
 
@@ -22,6 +24,8 @@ __all__ = [
     "LLMCacheEntry",
     "LLMCacheStats",
     "ExtractionMethod",
+    "FetchResult",
+    "SyncResult",
     "JobRepository",
 ]
 

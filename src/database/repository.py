@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class JobRepository:
     """Repository for job-related database operations."""
-    
+
     def __init__(self, db_path: Path | None = None):
         """Initialize repository.
         
@@ -29,13 +29,13 @@ class JobRepository:
         self.db_path = db_path or get_db_path()
         self._initialized = False
         self._connection: Optional[aiosqlite.Connection] = None
-    
+
     async def _ensure_initialized(self) -> None:
         """Ensure database is initialized."""
         if not self._initialized:
             await init_database(self.db_path)
             self._initialized = True
-    
+
     async def _get_connection(self) -> aiosqlite.Connection:
         """Get or create database connection.
         
@@ -46,15 +46,15 @@ class JobRepository:
             self._connection = await aiosqlite.connect(self.db_path)
             self._connection.row_factory = aiosqlite.Row
         return self._connection
-    
+
     async def close(self) -> None:
         """Close database connection."""
         if self._connection is not None:
             await self._connection.close()
             self._connection = None
-    
+
     # ==================== Sites ====================
-    
+
     async def get_site_by_domain(self, domain: str) -> Optional[Site]:
         """Get site by domain.
         
@@ -70,7 +70,7 @@ class JobRepository:
             (domain,)
         )
         row = await cursor.fetchone()
-        
+
         if row:
             return Site(
                 id=row["id"],
@@ -81,7 +81,7 @@ class JobRepository:
                 last_scanned_at=self._parse_datetime(row["last_scanned_at"]),
             )
         return None
-    
+
     async def create_site(self, domain: str, name: Optional[str] = None) -> Site:
         """Create new site record.
         
@@ -99,7 +99,7 @@ class JobRepository:
         )
         await db.commit()
         site_id = cursor.lastrowid
-        
+
         return Site(
             id=site_id,
             domain=domain,
@@ -107,7 +107,7 @@ class JobRepository:
             created_at=datetime.now(),
             last_scanned_at=None,
         )
-    
+
     async def get_or_create_site(self, domain: str, name: Optional[str] = None) -> Site:
         """Get existing site or create new one.
         
@@ -122,7 +122,7 @@ class JobRepository:
         if site:
             return site
         return await self.create_site(domain, name)
-    
+
     async def update_site_scanned(self, site_id: int) -> None:
         """Update site's last_scanned_at timestamp."""
         db = await self._get_connection()
@@ -131,7 +131,7 @@ class JobRepository:
             (site_id,)
         )
         await db.commit()
-    
+
     async def update_site_description(self, site_id: int, description: str) -> None:
         """Update site's description.
         
@@ -145,9 +145,9 @@ class JobRepository:
             (description, site_id)
         )
         await db.commit()
-    
+
     # ==================== Career URLs ====================
-    
+
     async def get_career_urls(self, site_id: int, active_only: bool = True) -> list[CareerUrl]:
         """Get career URLs for a site.
         
@@ -163,10 +163,10 @@ class JobRepository:
         if active_only:
             query += " AND is_active = TRUE"
         query += " ORDER BY last_success_at DESC NULLS LAST"
-        
+
         cursor = await db.execute(query, (site_id,))
         rows = await cursor.fetchall()
-        
+
         return [
             CareerUrl(
                 id=row["id"],
@@ -175,17 +175,18 @@ class JobRepository:
                 platform=row["platform"],
                 is_active=bool(row["is_active"]),
                 fail_count=row["fail_count"],
+                suspicious_count=row["suspicious_count"] if "suspicious_count" in row.keys() else 0,
                 last_success_at=self._parse_datetime(row["last_success_at"]),
                 last_fail_at=self._parse_datetime(row["last_fail_at"]),
                 created_at=self._parse_datetime(row["created_at"]),
             )
             for row in rows
         ]
-    
+
     async def add_career_url(
-        self, 
-        site_id: int, 
-        url: str, 
+        self,
+        site_id: int,
+        url: str,
         platform: Optional[str] = None
     ) -> CareerUrl:
         """Add career URL for a site.
@@ -214,7 +215,7 @@ class JobRepository:
         )
         row = await cursor.fetchone()
         await db.commit()
-        
+
         return CareerUrl(
             id=row["id"],
             site_id=row["site_id"],
@@ -222,26 +223,28 @@ class JobRepository:
             platform=row["platform"],
             is_active=True,
             fail_count=0,
+            suspicious_count=0,
             last_success_at=self._parse_datetime(row["last_success_at"]),
             last_fail_at=self._parse_datetime(row["last_fail_at"]),
             created_at=self._parse_datetime(row["created_at"]),
         )
-    
+
     async def mark_url_success(self, url_id: int) -> None:
-        """Mark career URL as successful."""
+        """Mark career URL as successful and reset counters."""
         db = await self._get_connection()
         await db.execute(
             """
             UPDATE career_urls 
             SET last_success_at = CURRENT_TIMESTAMP, 
                 fail_count = 0,
+                suspicious_count = 0,
                 is_active = TRUE
             WHERE id = ?
             """,
             (url_id,)
         )
         await db.commit()
-    
+
     async def mark_url_failed(self, url_id: int, max_failures: int = 3) -> bool:
         """Mark career URL as failed.
         
@@ -263,14 +266,14 @@ class JobRepository:
             """,
             (url_id,)
         )
-        
+
         # Check if exceeded max failures
         cursor = await db.execute(
             "SELECT fail_count FROM career_urls WHERE id = ?",
             (url_id,)
         )
         row = await cursor.fetchone()
-        
+
         if row and row["fail_count"] >= max_failures:
             await db.execute(
                 "UPDATE career_urls SET is_active = FALSE WHERE id = ?",
@@ -279,12 +282,71 @@ class JobRepository:
             await db.commit()
             logger.warning(f"Career URL {url_id} marked as inactive after {max_failures} failures")
             return True
-        
+
         await db.commit()
         return False
-    
+
+    async def mark_url_suspicious(self, url_id: int, max_suspicious: int = 3) -> tuple[int, bool]:
+        """Mark career URL as having suspicious job drop.
+        
+        Called when page loads but jobs dropped significantly (>50%).
+        
+        Args:
+            url_id: Career URL ID
+            max_suspicious: Max suspicious drops before confirming removal
+            
+        Returns:
+            Tuple of (current_count, should_sync)
+            - should_sync is True if exceeded max_suspicious (confirmed removal)
+        """
+        db = await self._get_connection()
+        # Increment suspicious count
+        await db.execute(
+            """
+            UPDATE career_urls 
+            SET suspicious_count = suspicious_count + 1
+            WHERE id = ?
+            """,
+            (url_id,)
+        )
+
+        # Get current count
+        cursor = await db.execute(
+            "SELECT suspicious_count FROM career_urls WHERE id = ?",
+            (url_id,)
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+
+        count = row["suspicious_count"] if row else 1
+        should_sync = count >= max_suspicious
+
+        if should_sync:
+            logger.info(f"Career URL {url_id}: suspicious drop confirmed after {count} occurrences")
+        else:
+            logger.warning(f"Career URL {url_id}: suspicious job drop ({count}/{max_suspicious})")
+
+        return count, should_sync
+
+    async def get_active_job_count(self, site_id: int) -> int:
+        """Get count of currently active jobs for a site.
+        
+        Args:
+            site_id: Site ID
+            
+        Returns:
+            Count of active jobs
+        """
+        db = await self._get_connection()
+        cursor = await db.execute(
+            "SELECT COUNT(*) as cnt FROM jobs WHERE site_id = ? AND is_active = TRUE",
+            (site_id,)
+        )
+        row = await cursor.fetchone()
+        return row["cnt"] if row else 0
+
     # ==================== Jobs ====================
-    
+
     async def get_active_jobs(self, site_id: int) -> list[CachedJob]:
         """Get all active jobs for a site.
         
@@ -300,9 +362,9 @@ class JobRepository:
             (site_id,)
         )
         rows = await cursor.fetchall()
-        
+
         return [self._row_to_cached_job(row) for row in rows]
-    
+
     async def get_previous_job_count(self, site_id: int) -> int:
         """Get count of previously active jobs (including currently inactive).
         
@@ -321,7 +383,7 @@ class JobRepository:
         )
         row = await cursor.fetchone()
         return row["cnt"] if row else 0
-    
+
     async def sync_jobs(self, site_id: int, current_jobs: list[Job]) -> SyncResult:
         """Synchronize jobs with database.
         
@@ -339,7 +401,7 @@ class JobRepository:
             SyncResult with new, removed, and reactivated jobs
         """
         result = SyncResult(total_jobs=len(current_jobs))
-        
+
         db = await self._get_connection()
         # Get all jobs for site (including inactive)
         cursor = await db.execute(
@@ -347,39 +409,39 @@ class JobRepository:
             (site_id,)
         )
         existing_rows = await cursor.fetchall()
-        
+
         # Check if this is the first scan (no existing jobs)
         result.is_first_scan = len(existing_rows) == 0
-        
+
         # Build lookup by (title, location)
         existing_jobs = {}
         for row in existing_rows:
             key = self._job_key(row["title"], row["location"])
             existing_jobs[key] = self._row_to_cached_job(row)
-        
+
         # Track which existing jobs we've seen
         seen_keys = set()
-        
+
         # Deduplicate current_jobs by key (title, location)
         unique_jobs = {}
         for job in current_jobs:
             key = self._job_key(job.title, job.location)
             if key not in unique_jobs:
                 unique_jobs[key] = job
-        
+
         for job in unique_jobs.values():
             key = self._job_key(job.title, job.location)
             seen_keys.add(key)
-            
+
             if key in existing_jobs:
                 existing = existing_jobs[key]
-                
+
                 # Update last_seen_at
                 await db.execute(
                     "UPDATE jobs SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (existing.id,)
                 )
-                
+
                 if not existing.is_active:
                     # Job reappeared - reactivate
                     await db.execute(
@@ -387,8 +449,8 @@ class JobRepository:
                         (existing.id,)
                     )
                     await self._add_history_event(
-                        db, existing.id, "reactivated", 
-                        f"Job reappeared after being removed"
+                        db, existing.id, "reactivated",
+                        "Job reappeared after being removed"
                     )
                     result.reactivated_jobs.append(job)
                     logger.debug(f"Reactivated job: {job.title}")
@@ -402,7 +464,7 @@ class JobRepository:
                 except sqlite3.IntegrityError:
                     # Job already exists (race condition or key mismatch)
                     logger.debug(f"Job already exists (skipped): {job.title}")
-        
+
         # Mark unseen active jobs as removed
         for key, existing in existing_jobs.items():
             if key not in seen_keys and existing.is_active:
@@ -412,7 +474,7 @@ class JobRepository:
                 )
                 await self._add_history_event(
                     db, existing.id, "removed",
-                    f"Job no longer found on site"
+                    "Job no longer found on site"
                 )
                 # Convert to Job for result
                 removed_job = Job(
@@ -426,16 +488,16 @@ class JobRepository:
                 )
                 result.removed_jobs.append(removed_job)
                 logger.debug(f"Removed job: {existing.title}")
-        
+
         await db.commit()
-        
+
         return result
-    
+
     async def _insert_job(self, db: aiosqlite.Connection, site_id: int, job: Job) -> int:
         """Insert new job into database."""
         skills_json = json.dumps(job.skills) if job.skills else None
         details_json = json.dumps(job.extraction_details) if job.extraction_details else None
-        
+
         cursor = await db.execute(
             """
             INSERT INTO jobs (
@@ -452,11 +514,11 @@ class JobRepository:
             )
         )
         return cursor.lastrowid
-    
+
     async def _add_history_event(
-        self, 
-        db: aiosqlite.Connection, 
-        job_id: int, 
+        self,
+        db: aiosqlite.Connection,
+        job_id: int,
         event: str,
         details: Optional[str] = None
     ) -> None:
@@ -465,11 +527,11 @@ class JobRepository:
             "INSERT INTO job_history (job_id, event, details) VALUES (?, ?, ?)",
             (job_id, event, details)
         )
-    
+
     # ==================== History ====================
-    
+
     async def get_job_history(
-        self, 
+        self,
         site_id: Optional[int] = None,
         limit: int = 100
     ) -> list[dict]:
@@ -508,12 +570,12 @@ class JobRepository:
                 """,
                 (limit,)
             )
-        
+
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
-    
+
     # ==================== Utilities ====================
-    
+
     def _job_key(self, title: str, location: Optional[str]) -> tuple:
         """Create unique key for job comparison.
         
@@ -524,7 +586,7 @@ class JobRepository:
         title_norm = self._normalize_string(title)
         location_norm = self._normalize_location(location) if location else ""
         return (title_norm, location_norm)
-    
+
     def _normalize_string(self, s: str) -> str:
         """Normalize string for comparison.
         
@@ -535,7 +597,7 @@ class JobRepository:
         - Normalizes whitespace
         """
         result = s.lower().strip()
-        
+
         # Remove common job posting suffixes that cause false positives
         # These are often added by job boards but aren't part of the actual title
         suffixes_to_remove = [
@@ -548,17 +610,17 @@ class JobRepository:
         ]
         for pattern in suffixes_to_remove:
             result = re.sub(pattern, '', result, flags=re.IGNORECASE)
-        
+
         # Remove gender notation: (m/w/d), (f/d/m), etc.
         result = re.sub(r'\s*\([mwfdx/]+\)\s*', ' ', result)
         # Also without parentheses at end: "Title m/w/d"
         result = re.sub(r'\s+[mwfdx]/[mwfdx](/[mwfdx])?\s*$', '', result)
-        
+
         # Normalize whitespace
         result = re.sub(r'\s+', ' ', result).strip()
-        
+
         return result
-    
+
     def _normalize_location(self, location: str) -> str:
         """Normalize location for comparison.
         
@@ -569,11 +631,11 @@ class JobRepository:
         - "Unknown" / None → "" (empty string)
         """
         result = location.lower().strip()
-        
+
         # Treat "unknown" as empty (equivalent to None)
         if result in ("unknown", "n/a", "na", "none", "-", ""):
             return ""
-        
+
         # Remove country suffixes (with comma or space)
         countries_to_remove = [
             r',?\s*deutschland\s*$',
@@ -594,7 +656,7 @@ class JobRepository:
         ]
         for pattern in countries_to_remove:
             result = re.sub(pattern, '', result, flags=re.IGNORECASE)
-        
+
         # Remove employment type suffixes often mixed with location
         employment_suffixes = [
             r',?\s*vollzeit\s*$',
@@ -607,13 +669,13 @@ class JobRepository:
         ]
         for pattern in employment_suffixes:
             result = re.sub(pattern, '', result, flags=re.IGNORECASE)
-        
+
         # Normalize whitespace and remove trailing commas
         result = re.sub(r'\s+', ' ', result).strip()
         result = result.rstrip(',').strip()
-        
+
         return result
-    
+
     def _parse_datetime(self, value) -> Optional[datetime]:
         """Parse datetime from database value."""
         if value is None:
@@ -624,19 +686,19 @@ class JobRepository:
             return datetime.fromisoformat(value)
         except (ValueError, TypeError):
             return None
-    
+
     def _row_to_cached_job(self, row) -> CachedJob:
         """Convert database row to CachedJob."""
         # Handle migration: extraction fields may not exist in old DBs
         extraction_method = None
         extraction_details = None
         row_keys = row.keys()
-        
+
         if "extraction_method" in row_keys:
             extraction_method = row["extraction_method"]
         if "extraction_details" in row_keys:
             extraction_details = row["extraction_details"]
-        
+
         return CachedJob(
             id=row["id"],
             site_id=row["site_id"],
@@ -659,9 +721,9 @@ class JobRepository:
             last_seen_at=self._parse_datetime(row["last_seen_at"]),
             is_active=bool(row["is_active"]),
         )
-    
+
     # ==================== LLM Cache ====================
-    
+
     async def get_llm_cache(self, key: str) -> Optional[LLMCacheEntry]:
         """Get LLM cache entry by key.
         
@@ -681,7 +743,7 @@ class JobRepository:
             (key,)
         )
         row = await cursor.fetchone()
-        
+
         if row:
             # Update hit count
             await db.execute(
@@ -689,7 +751,7 @@ class JobRepository:
                 (key,)
             )
             await db.commit()
-            
+
             return LLMCacheEntry(
                 key=row["key"],
                 namespace=row["namespace"],
@@ -701,7 +763,7 @@ class JobRepository:
                 tokens_saved=row["tokens_saved"],
             )
         return None
-    
+
     async def set_llm_cache(
         self,
         key: str,
@@ -736,7 +798,7 @@ class JobRepository:
             (key, namespace, value, model, ttl_seconds, tokens_saved)
         )
         await db.commit()
-    
+
     async def get_llm_cache_stats(self, namespace: Optional[str] = None) -> LLMCacheStats:
         """Get LLM cache statistics.
         
@@ -747,7 +809,7 @@ class JobRepository:
             LLMCacheStats with hit/miss counts
         """
         db = await self._get_connection()
-        
+
         if namespace:
             cursor = await db.execute(
                 """
@@ -770,15 +832,15 @@ class JobRepository:
                 FROM llm_cache
                 """
             )
-        
+
         row = await cursor.fetchone()
-        
+
         return LLMCacheStats(
             hits=row["total_hits"] or 0,
             misses=row["total_entries"] or 0,  # Each entry was a miss once
             total_tokens_saved=row["total_tokens_saved"] or 0,
         )
-    
+
     async def cleanup_expired_cache(self) -> int:
         """Remove expired cache entries.
         
@@ -794,7 +856,7 @@ class JobRepository:
         )
         await db.commit()
         return cursor.rowcount
-    
+
     async def clear_llm_cache(self, namespace: Optional[str] = None) -> int:
         """Clear LLM cache.
         
