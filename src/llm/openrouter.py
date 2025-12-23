@@ -221,15 +221,10 @@ class OpenRouterProvider(BaseLLMProvider):
         if has_routing:
             config["allow_fallbacks"] = self.allow_fallbacks
         
-        # Требуемые параметры от провайдера (формат: {"param": true})
-        required = {}
-        if self.require_parameters:
-            for param in self.require_parameters:
-                required[param] = True
-        if require_structured:
-            required["json_schema"] = True
-        if required:
-            config["require_parameters"] = required
+        # require_parameters = true фильтрует провайдеров по поддержке параметров запроса
+        # (например response_format.type: json_schema)
+        if require_structured or self.require_parameters:
+            config["require_parameters"] = True
         
         return config
 
